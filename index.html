@@ -225,7 +225,7 @@ label:has(> input[type=checkbox]), label:has(> input[type=radio]) { display: inl
   <span class="conv-only"><label class="f" title="교과서는 비워 두세요(출판사+과목, 예: 미래엔 공통수학1 으로 자동 정해집니다). 시중교재는 책 이름(예: 쎈 공통수학1), 시험지·학습지는 시험 이름(예: 26 광남중 2-2 중간). 시험지는 학교 이름으로 폴더가 나뉩니다">교재·시험 이름<input id="s-book" size="16" placeholder="비워 두면 출판사+과목"></label></span>
   <span class="sp"></span>
   <button id="b-bank" title="문제 json만 모아 두는 전용 폴더(예: 내 드라이브/문제은행 JSON)를 고릅니다. 시판 교재 파일이 있는 폴더와는 따로 둡니다">문제은행 JSON 폴더 연결</button>
-  <span class="conv-only"><button id="b-tobank">문제은행에 저장</button></span>
+  <span class="conv-only"><button id="b-tobank" title="목록의 문제를 모두 문제은행 JSON 폴더에 저장합니다(검수 완료 표시는 선택). 오타는 앱의 원본 비교에서 확인합니다">문제은행에 저장</button></span>
   <span class="conv-only"><button id="b-load" title="임시 저장한 작업을 이어서 합니다(문제은행 JSON/_임시저장)">작업 불러오기</button><input type="file" id="f-json" accept=".json" hidden></span>
   <span class="conv-only"><button id="b-save" title="검수 중인 작업 전체를 임시 저장합니다(문제은행 JSON/_임시저장). 완성된 문제는 '문제은행에 저장'으로">작업 저장</button></span>
   <span class="conv-only"><button id="b-hwpx" class="primary">HWPX 저장</button></span>
@@ -339,6 +339,16 @@ label:has(> input[type=checkbox]), label:has(> input[type=radio]) { display: inl
     </div>
     <label><input type="checkbox" id="bq-arch"> 보관(교재 만들 때 기본으로 빼기)</label>
     <div class="row" style="justify-content:flex-end"><button id="bq-cancel">취소</button><button id="bq-go" class="primary">문제은행에 저장</button></div>
+  </div>
+</dialog>
+<dialog id="dlg-ur" style="max-width:640px;width:94vw">
+  <h2>쪽 범위로 단원 정하기</h2>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <p class="note">교재 쪽 범위마다 소단원을 정하면 그 쪽에 있는 문제에 단원이 붙습니다. 교과서·평가자료처럼 단원이 쪽으로 나뉘는 책에 씁니다. 같은 교재 이름이면 다음에 열 때도 이 표를 기억합니다.</p>
+    <p class="note" id="ur-book"></p>
+    <div id="ur-rows" style="display:flex;flex-direction:column;gap:6px"></div>
+    <div class="row"><button id="ur-add">+ 줄 추가</button><span class="sp"></span><span class="note" id="ur-sum"></span></div>
+    <div class="row" style="justify-content:flex-end"><button id="ur-cancel">닫기</button><button id="ur-empty" title="단원이 비어 있는 문제에만">비어 있는 문제에 적용</button><button id="ur-all" class="primary" title="범위 안의 문제는 이미 고른 단원도 바뀜">범위 안 모두에 적용</button></div>
   </div>
 </dialog>
 <dialog id="dlg-ph" style="max-width:520px;width:90vw">
@@ -4281,12 +4291,14 @@ async function analyze(from = 1, to = pdf.numPages) {
   const carry = { rules: RULES.rules[state.pub] || [], workbook: state.kind === '교사용 평가자료', wbKind: { '소단원 확인': '소단원', '중단원 수준별': '중단원', '대단원 TEST': '대단원' }[state.wbSec] || '소단원' };
   /* 범위 바로 앞 두 장은 문제를 만들지 않고 "대단원·익힘책·기초/기본/도전" 같은 이어지는 구역 정보만 읽음 */
   for (let n = Math.max(1, from - 2); n < from; n++) detect(await readPage(n), carry);
+  const fresh = [];
   for (let n = from; n <= to; n++) {
     $('#pginfo').textContent = `문제 찾는 중… ${n} / ${pdf.numPages}장 (${from}~${to}장)`;
     const P = await readPage(n);
     const { found, pageNum } = detect(P, carry);
-    for (const f of found) { const it = makeItem({ ...f, pdfPage: n }, P, pageNum); await autoFigs(it, P); state.items.push(it); }
+    for (const f of found) { const it = makeItem({ ...f, pdfPage: n }, P, pageNum); await autoFigs(it, P); state.items.push(it); fresh.push(it); }
   }
+  urAutoFill(fresh);
   sortItems();
 }
 const AUTO_PAGES = 30;   // 이보다 긴 PDF는 장 범위를 골라 나눠서 찾음
@@ -4309,9 +4321,10 @@ function renderList() {
   if (!state.items.length) { L.innerHTML = '<p class="empty">찾은 문제가 없습니다. 쪽 위에서 "+ 상자 그리기"로 직접 만들 수 있습니다.</p>'; return; }
   const done = state.items.filter(x => x.done).length;
   let h = `<div class="grp">문제 ${state.items.length}개 · 검수 완료 ${done}개</div>`;
-  if (state.items.some(x => x.hwpx)) {   // HWPX 문제는 한 파일이 대개 한 단원: 한꺼번에 지정
+  {   // 단원 한꺼번에: 쪽 범위로 / 하나로
     const U = UNITS[state.subj] || {}, hu = state.hxUnit || {};
-    h += `<div class="hxbulk"><b>단원 일괄 지정</b><div class="row"><select id="hx-mid"><option value="">(중단원)</option>${Object.keys(U).map(k => `<option ${k === hu.mid ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select><select id="hx-sub"><option value="">(소단원)</option>${(U[hu.mid] || []).map(k => `<option ${k === hu.sub ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></div><div class="row"><button id="hx-empty" title="단원이 비어 있는 HWPX 문제에만 적용">비어 있는 문제에</button><button id="hx-all" title="HWPX에서 읽은 모든 문제에 적용(이미 고른 단원도 바뀜)">모두에</button></div></div>`;
+    h += `<div class="hxbulk"><button id="ur-open" title="교재 쪽 범위마다 소단원을 정해 두면 그 쪽의 문제에 단원이 붙습니다(같은 교재는 다음에도 기억)">쪽 범위로 단원 정하기</button></div>`;
+    h += `<div class="hxbulk"><b>단원 일괄 지정</b><div class="row"><select id="hx-mid"><option value="">(중단원)</option>${Object.keys(U).map(k => `<option ${k === hu.mid ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select><select id="hx-sub"><option value="">(소단원)</option>${(U[hu.mid] || []).map(k => `<option ${k === hu.sub ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></div><div class="row"><button id="hx-empty" title="단원이 비어 있는 문제에만 적용">비어 있는 문제에</button><button id="hx-all" title="목록의 모든 문제에 적용(이미 고른 단원도 바뀜)">모두에</button></div></div>`;
   }
   let lastPg = null;
   for (const it of state.items) {
@@ -4330,8 +4343,8 @@ $('#list').addEventListener('change', e => {
 $('#list').addEventListener('click', e => {
   const all = e.target.id === 'hx-all', empty = e.target.id === 'hx-empty'; if (!all && !empty) return;
   const hu = state.hxUnit || {}; if (!hu.mid || !hu.sub) return alert('중단원과 소단원을 먼저 골라 주세요.');
-  const tgt = state.items.filter(x => x.hwpx && (all || !x.mid || !x.sub)); if (!tgt.length) return alert('적용할 문제가 없습니다.');
-  if (all && !confirm(`HWPX에서 읽은 문제 ${tgt.length}개 모두의 단원을 "${hu.mid} > ${hu.sub}" 로 바꿀까요?`)) return;
+  const tgt = state.items.filter(x => all || !x.mid || !x.sub); if (!tgt.length) return alert('적용할 문제가 없습니다.');
+  if (all && !confirm(`목록의 문제 ${tgt.length}개 모두의 단원을 "${hu.mid} > ${hu.sub}" 로 바꿀까요?`)) return;
   for (const x of tgt) { x.mid = hu.mid; x.sub = hu.sub; }
   save(); renderList(); renderEditor();
 });
@@ -4424,16 +4437,31 @@ async function hxPdfPage(pg) {
   for (let n = 1; n <= pdf.numPages; n++) if (+(await readPage(n)).pageNum === pg) return (hxPdfMap[pg] = n);
   return (hxPdfMap[pg] = 0);
 }
-async function drawHxRef(it) {
-  const c = $('#crop'); $('#oddboxes').innerHTML = ''; $('#solline').hidden = true; cropInfo = null;
-  const pp = it.page ? await hxPdfPage(+it.page) : 0;
-  if (!pp) { c.width = 0; c.height = 0; $('#o-note').textContent = `열어 둔 PDF에서 ${it.page || '?'}쪽을 찾지 못했습니다(PDF 쪽 아래 번호로 찾아요). HWPX에서 읽은 글·수식은 오른쪽에서 확인하세요.`; return; }
+/* 같은 문제 상자 찾기: 예제처럼 풀이가 이어지면 문제 부분(풀이 위)까지만 */
+async function hxFindRef(it) {
+  if (!pdf || !it.page) return null;
+  const pp = await hxPdfPage(+it.page); if (!pp) return null;
   const P = await readPage(pp); let box = null;
   try {
     const { found } = detect(P, { rules: RULES.rules[state.pub] || [], workbook: false });
     const f = found.find(q => q.kind === it.kind && String(q.num) === String(it.num)) || found.find(q => String(q.num) === String(it.num) && it.kind !== '문제' && it.kind !== '예제');
-    if (f && f.box) box = f.box;
+    if (f && f.box) { box = { ...f.box }; if (f.solY && f.solY > box.y0 && f.solY < box.y1) box.y1 = f.solY; }
   } catch (e) { }
+  return { pp, P, box };
+}
+/* 저장 전에: 원본 위치(it.ref)와 원본 그림(it.orig). PDF가 없거나 상자를 못 찾으면 비움 */
+async function hxMakeOrig(it) {
+  const r = await hxFindRef(it);
+  if (!r || !r.box) { delete it.ref; delete it.orig; return false; }
+  it.ref = { pdfPage: r.pp, box: r.box };
+  it.orig = { png: await cropPng(r.P, r.box), box: r.box, page: r.pp };
+  return true;
+}
+async function drawHxRef(it) {
+  const c = $('#crop'); $('#oddboxes').innerHTML = ''; $('#solline').hidden = true; cropInfo = null;
+  const ref = await hxFindRef(it), pp = ref ? ref.pp : 0;
+  if (!pp) { c.width = 0; c.height = 0; $('#o-note').textContent = `열어 둔 PDF에서 ${it.page || '?'}쪽을 찾지 못했습니다(PDF 쪽 아래 번호로 찾아요). HWPX에서 읽은 글·수식은 오른쪽에서 확인하세요.`; return; }
+  const P = ref.P, box = ref.box;
   const s = box ? 3 : 2, vp = P.page.getViewport({ scale: s }), full = document.createElement('canvas'); full.width = vp.width; full.height = vp.height;
   await P.page.render({ canvasContext: full.getContext('2d'), viewport: vp }).promise;
   if (state.selId !== it.id) return;   // 그리는 동안 다른 문제를 골랐으면 그만
@@ -4617,6 +4645,59 @@ $('#s-book').addEventListener('input', e => { state.book = e.target.value.trim()
 $('#b-prev').onclick = () => showPage(state.pageNo - 1);
 $('#b-next').onclick = () => showPage(state.pageNo + 1);
 $('#b-zoom').onclick = () => { scale = scale >= 2.2 ? 1.1 : +(scale + 0.4).toFixed(1); showPage(state.pageNo); };
+/* ── 쪽 범위로 단원 정하기 ──
+   교재 단원은 쪽 범위로 정해짐(예: 미래엔 공통수학1 12~21쪽 = 1.1 다항식의 연산). 줄마다 [시작 쪽, 끝 쪽, 중단원, 소단원].
+   교재(교재 이름 + 과목)마다 브라우저에 기억해 두고, 작업 저장에도 함께 들어감 */
+const UR_LS = 'naesin-unit-ranges-v1';
+const urKey = () => `${bookName()}|${state.subj}`;
+const urLoadAll = () => { try { return JSON.parse(localStorage.getItem(UR_LS)) || {}; } catch (e) { return {}; } };
+function urRows() { return state.unitRanges && state.unitRanges.key === urKey() ? state.unitRanges.rows : (urLoadAll()[urKey()] || []); }
+function urStore(rows) { state.unitRanges = { key: urKey(), rows }; const all = urLoadAll(); all[urKey()] = rows; try { localStorage.setItem(UR_LS, JSON.stringify(all)); } catch (e) { } save(); }
+/* 문제 하나의 단원: 쪽이 들어가는 첫 줄 */
+function urUnitOf(rows, page) {
+  const p = +page; if (!p) return null;
+  return rows.find(r => r.mid && r.sub && +r.a && +r.b && p >= +r.a && p <= +r.b) || null;
+}
+function urApply(rows, all) {
+  let n = 0;
+  for (const it of state.items) { const r = urUnitOf(rows, it.page); if (!r || (!all && it.mid && it.sub)) continue; it.mid = r.mid; it.sub = r.sub; n++; }
+  return n;
+}
+function urRender(rows) {
+  const U = UNITS[state.subj] || {};
+  $('#ur-book').textContent = `교재: ${bookName()} · 과목: ${state.subj} (위쪽에서 바꾸면 다른 표)`;
+  $('#ur-rows').innerHTML = rows.map((r, i) => `<div class="row" data-ur="${i}" style="gap:6px;flex-wrap:wrap">
+    <input class="ur-a" type="number" min="1" value="${esc(r.a ?? '')}" style="width:64px" aria-label="시작 쪽"> ~ <input class="ur-b" type="number" min="1" value="${esc(r.b ?? '')}" style="width:64px" aria-label="끝 쪽"> 쪽
+    <select class="ur-mid"><option value="">(중단원)</option>${Object.keys(U).map(k => `<option ${k === r.mid ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
+    <select class="ur-sub"><option value="">(소단원)</option>${(U[r.mid] || []).map(k => `<option ${k === r.sub ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
+    <button class="ur-del" title="이 줄 지우기">×</button></div>`).join('') || '<p class="note">"+ 줄 추가"로 쪽 범위를 넣어 주세요.</p>';
+  urSum(rows);
+}
+function urSum(rows) {
+  const cnt = state.items.filter(it => urUnitOf(rows, it.page)).length, pages = state.items.map(x => +x.page).filter(Boolean);
+  $('#ur-sum').textContent = `범위 안 문제 ${cnt}개 / 목록 ${state.items.length}개${pages.length ? ` (쪽 ${Math.min(...pages)}~${Math.max(...pages)})` : ''}`;
+}
+let urWork = [];
+function urRead() {   // 화면의 값을 urWork 로
+  $('#ur-rows').querySelectorAll('[data-ur]').forEach(d => { const r = urWork[+d.dataset.ur]; r.a = d.querySelector('.ur-a').value; r.b = d.querySelector('.ur-b').value; r.mid = d.querySelector('.ur-mid').value; r.sub = d.querySelector('.ur-sub').value; });
+}
+$('#list').addEventListener('click', e => { if (e.target.id !== 'ur-open') return; urWork = urRows().map(r => ({ ...r })); if (!urWork.length) urWork.push({ a: '', b: '', mid: '', sub: '' }); urRender(urWork); $('#dlg-ur').showModal(); });
+$('#ur-add').onclick = () => { urRead(); const last = urWork[urWork.length - 1]; urWork.push({ a: last && last.b ? +last.b + 1 : '', b: '', mid: last ? last.mid : '', sub: '' }); urRender(urWork); };
+$('#ur-rows').addEventListener('click', e => { const d = e.target.closest('[data-ur]'); if (!d || !e.target.classList.contains('ur-del')) return; urRead(); urWork.splice(+d.dataset.ur, 1); urRender(urWork); });
+$('#ur-rows').addEventListener('change', e => {   // 중단원을 바꿀 때만 다시 그림(소단원 목록). 쪽 숫자는 다시 그리지 않아야 다음 칸으로 옮길 때 입력이 안 사라짐
+  const d = e.target.closest('[data-ur]'); if (!d) return; urRead();
+  if (e.target.classList.contains('ur-mid')) { urWork[+d.dataset.ur].sub = ''; urRender(urWork); } else urSum(urWork);
+});
+$('#ur-cancel').onclick = () => { urRead(); urStore(urWork.filter(r => r.a || r.b || r.mid)); $('#dlg-ur').close(); };
+for (const [id, all] of [['ur-empty', false], ['ur-all', true]]) $('#' + id).onclick = () => {
+  urRead(); const rows = urWork.filter(r => r.a || r.b || r.mid);
+  const bad = rows.find(r => !(+r.a) || !(+r.b) || +r.a > +r.b || !r.mid || !r.sub); if (bad) return alert('쪽 범위(시작 ≤ 끝)와 중단원·소단원을 모두 채워 주세요.');
+  urStore(rows); const n = urApply(rows, all);
+  $('#dlg-ur').close(); renderList(); renderEditor(); save();
+  alert(`문제 ${n}개에 단원을 붙였습니다.${state.items.some(x => !x.page) ? '\n쪽 번호가 없는 문제(기출 등)는 "단원 일괄 지정"이나 문제마다 골라 주세요.' : ''}`);
+};
+/* 새로 찾거나 읽은 문제: 표가 있으면 그 쪽 범위의 단원을 바로 붙임(낱말로 추천한 단원보다 쪽 범위가 먼저) */
+function urAutoFill(list) { const rows = urRows(); if (!rows.length) return; for (const it of list) { const r = urUnitOf(rows, it.page); if (r) { it.mid = r.mid; it.sub = r.sub; } } }
 /* ── HWPX 불러오기 ──
    한글(HWPX) 교재 파일은 글·수식·그림이 구조로 들어 있어서 PDF처럼 글꼴을 풀거나 쪽 그림을 읽을 필요가 없습니다.
    문서 순서대로 문단을 읽고, 표지 문단으로 문제를 나눕니다.
@@ -4949,7 +5030,7 @@ async function loadHwpx(f) {
     if (used.has(it.file)) it.file = it.file + '_' + it.ord;
     used.add(it.file); state.items.push(it); first = first || it;
   }
-  sortItems(); renderList(); setStep(2); await select(first.id); save();
+  urAutoFill(state.items.filter(x => x.hwpx && x.ord >= ord - found.length)); sortItems(); renderList(); setStep(2); await select(first.id); save();
   alert(`HWPX에서 문제 ${found.length}개를 읽었습니다(그림 ${found.reduce((n, q) => n + q.figs.length + q.solFigs.length, 0)}개).\n${changed.length ? '파일 이름을 보고 ' + changed.join(', ') + ' 로 맞췄습니다.\n' : ''}지금 과목: ${state.subj}, 출판사: ${state.pub}, 자료 종류: ${state.kind}\n위쪽 출판사·자료 종류·과목이 맞는지 확인하고, 단원은 목록 위쪽 "단원 일괄 지정"으로 한꺼번에 정할 수 있어요.\n정답은 이 파일에 없으면 비어 있으니 "정답과 해설 PDF"로 연결하거나 직접 적어 주세요.`);
 }
 $('#f-hwpx').addEventListener('change', async e => {
@@ -5506,6 +5587,7 @@ function baseRecord(it, figFiles, solFiles) {
     그림: it.figs.map((f, i) => figEntry(f, figFiles[i])),
     해설그림: (it.solFigs || []).map((f, i) => figEntry(f, (solFiles || [])[i])),
     답형식: ansTypeOf(it), 대표: !!it.rep, 태그: (it.tags || []).slice(), 검사: null,
+    ...(!it.box && it.ref ? { 원본: { pdf쪽: it.ref.pdfPage, x0: +it.ref.box.x0.toFixed(1), y0: +it.ref.box.y0.toFixed(1), x1: +it.ref.box.x1.toFixed(1), y1: +it.ref.box.y1.toFixed(1) } } : {}),
     ...(it.box && it.pdfPage ? { 원본: (b => ({ pdf쪽: it.pdfPage, x0: +b.x0.toFixed(1), y0: +b.y0.toFixed(1), x1: +b.x1.toFixed(1), y1: +b.y1.toFixed(1) }))(origBox(it)) } : {}),
     ...(it.image ? { 이미지: { 파일: bankFileName({ 자료: state.kind, 교재: bookName(), 파일: it.file }) + '_사진.png', 너비: toMm(it.image.w), 높이: toMm(it.image.h), 단위: 'mm', 범위: it.image.range } } : {}),
     보관: !!it.archived, 저장: new Date().toISOString(),
@@ -5603,17 +5685,22 @@ async function writeRec(root, r, index) {
 }
 $('#b-tobank').onclick = async () => {
   if (!bank.root) return alert('먼저 "문제은행 JSON 폴더 연결"로 구글 드라이브의 문제은행 JSON 폴더를 골라 주세요.');
-  const list = state.items.filter(x => x.done);
-  if (!list.length) return alert('검수 완료한 문제가 없습니다.');
+  /* 오타 검수는 앱의 원본 비교에서 함: 변환기는 빠진 문제·단원·코너·그림만 훑고 전체를 저장(검수 완료 표시는 선택) */
+  const list = state.items.slice();
+  if (!list.length) return alert('저장할 문제가 없습니다.');
+  const nDone = list.filter(x => x.done).length;
+  if (!confirm(`문제 ${list.length}개를 모두 저장합니다(검수 완료 표시 ${nDone}개).\n오타는 앱의 원본 비교에서 확인하면 됩니다. 저장할까요?`)) return;
   const names = list.map(x => safeName(x.file)), dup = names.filter((n, i) => names.indexOf(n) !== i);
   if (dup.length) return alert('파일 이름이 겹치는 문제가 있습니다: ' + [...new Set(dup)].join(', ') + '\n파일 이름을 고친 뒤 다시 저장해 주세요.');
   const noUnit = list.filter(x => !x.mid || !x.sub).length;
   if (noUnit && !confirm(`단원이 비어 있는 문제가 ${noUnit}개 있습니다. 그대로 저장할까요?`)) return;
   if (!(await ensurePermission(bank.root))) return alert('폴더에 저장할 권한이 없습니다.');
   try {
-    for (const it of list) { await makeImage(it); await makeOrig(it); await placeFigs(it); }   // 이미지 문제 사진·교과서 원본 그림을 새로 자르고 그림 자리를 정함
+    let hxNo = 0;
+    for (const it of list) { await makeImage(it); if (it.hwpx) { if (!(await hxMakeOrig(it))) hxNo++; } else await makeOrig(it); await placeFigs(it); }   // 이미지 문제 사진·교과서 원본 그림을 새로 자르고 그림 자리를 정함(HWPX 문제는 같이 연 PDF에서)
     const n = await saveToBank(bank.root, list);
     save(); renderList();
+    if (hxNo) alert(`HWPX 문제 ${hxNo}개는 원본 그림 없이 저장했습니다. ${pdf ? '열어 둔 PDF에서 같은 문제 상자를 찾지 못했어요.' : '같은 교재 PDF를 같이 열고 다시 저장하면 앱의 원본 비교용 그림도 들어갑니다.'}`);
     alert(`문제 ${n}개를 ${bank.root.name}/${state.subj}/대단원/중단원/${KIND_DIR[state.kind] || state.kind}/${isExam(state.kind) ? schoolOf(bookName()) : state.pub} 폴더에 저장했습니다.`);
   } catch (e) { alert('저장하지 못했습니다: ' + e.message); }
 };
