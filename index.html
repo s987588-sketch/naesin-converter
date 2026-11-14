@@ -5033,7 +5033,7 @@ function hxProblems(paras) {
   return res;
 }
 /* 그림 개체 → PNG (잘라낸 부분만) */
-async function hxPic(zip, manifest, pic) {
+async function hxPic(zip, manifest, pic, opt = {}) {
   const img = pic.getElementsByTagNameNS(HC_NS, 'img')[0]; if (!img) return null;
   const ref = img.getAttribute('binaryItemIDRef'), href = manifest[ref] || [...Object.keys(zip.files)].find(n => new RegExp('^BinData/' + ref + '\\.', 'i').test(n));
   const f = href && zip.file(href); if (!f) return null;
@@ -5042,7 +5042,7 @@ async function hxPic(zip, manifest, pic) {
   const w = (dimOf(cs, 'width') || dimOf(ss, 'width') || dimOf(os, 'width') * (+(sca && sca.getAttribute('e1')) || 1)) / 100;   // HWPUNIT(1/7200 인치) → pt
   const h = (dimOf(cs, 'height') || dimOf(ss, 'height') || dimOf(os, 'height') * (+(sca && sca.getAttribute('e5')) || 1)) / 100;
   const asChar = pos && pos.getAttribute('treatAsChar') === '1', relV = pos && pos.getAttribute('vertRelTo'), relH = pos && pos.getAttribute('horzRelTo');
-  if (!asChar && (relV === 'PAPER' || relH === 'PAPER' || wrap === 'BEHIND_TEXT')) return null;   // 장식(표지·쪽 가장자리)은 그림이 아님
+  if (!opt.float && !asChar && (relV === 'PAPER' || relH === 'PAPER' || wrap === 'BEHIND_TEXT')) return null;   // 장식(표지·쪽 가장자리)은 그림이 아님(종이에 고정된 문제 그림은 hxFloats 에서 따로)
   if (w < 20 || h < 20) return null;
   const clip = hxFirst(pic, 'imgClip'), org = hxFirst(pic, 'orgSz'), dim = hxFirst(pic, 'imgDim');
   const url = URL.createObjectURL(new Blob([await f.async('uint8array')], { type: /\.gif$/i.test(href) ? 'image/gif' : /\.png$/i.test(href) ? 'image/png' : /\.bmp$/i.test(href) ? 'image/bmp' : 'image/jpeg' }));
@@ -5053,7 +5053,7 @@ async function hxPic(zip, manifest, pic) {
     const l = (+(clip && clip.getAttribute('left')) || 0) * kx, r = clip && clip.getAttribute('right') ? +clip.getAttribute('right') * kx : im.naturalWidth, t = (+(clip && clip.getAttribute('top')) || 0) * ky, b = clip && clip.getAttribute('bottom') ? +clip.getAttribute('bottom') * ky : im.naturalHeight;
     const cw = Math.max(1, Math.round(Math.min(r, im.naturalWidth) - l)), ch = Math.max(1, Math.round(Math.min(b, im.naturalHeight) - t));
     const c = document.createElement('canvas'); c.width = cw; c.height = ch; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cw, ch); g.drawImage(im, l, t, cw, ch, 0, 0, cw, ch);
-    return { png: c.toDataURL('image/png'), w, h, place: !asChar && /SQUARE|TIGHT|THROUGH/.test(wrap) ? '오른쪽' : '아래', hwpx: true };
+    return { png: c.toDataURL('image/png'), w, h, place: !asChar && /SQUARE|TIGHT|THROUGH/.test(wrap) ? '오른쪽' : '아래', hwpx: true, pos: { relV, relH, vOff: +(pos && pos.getAttribute('vertOffset')) / 100 || 0, hOff: +(pos && pos.getAttribute('horzOffset')) / 100 || 0, vAlign: pos && pos.getAttribute('vertAlign'), hAlign: pos && pos.getAttribute('horzAlign') } };
   } catch (e) { return null; } finally { URL.revokeObjectURL(url); }
 }
 async function hxBuild(f) {
@@ -5062,12 +5062,22 @@ async function hxBuild(f) {
   if (hpf) for (const m of (await hpf.async('string')).matchAll(/<opf:item\b[^>]*>/g)) { const id = /\bid="([^"]*)"/.exec(m[0]), hr = /\bhref="([^"]*)"/.exec(m[0]); if (id && hr) manifest[id[1]] = hr[1]; }
   const names = Object.keys(zip.files).filter(n => /^Contents\/section\d+\.xml$/i.test(n)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]);
   if (!names.length) throw new Error('HWPX 안에서 본문(section)을 찾지 못했습니다');
-  const probs = []; let page0 = null;
+  const probs = [], floats = []; let page0 = null;
   for (const n of names) {
     const doc = new DOMParser().parseFromString(await zip.file(n).async('string'), 'application/xml');
     if (doc.querySelector('parsererror')) throw new Error(n + ' 을(를) 읽지 못했습니다');
     const w = hxParas(doc.documentElement), paras = w.walk();
     for (const q of hxProblems(paras)) probs.push(q);
+    /* 종이(쪽)에 고정된 그림: 문제 문단 밖에 붙어 있어서 문제 글로는 못 찾음 → 쪽·세로 위치를 남겨 두고, 같이 연 PDF의 문제 위치로 짝지음.
+       배경(글 뒤)·쪽만 한 그림·작은 아이콘은 장식이라 뺌 */
+    for (const e of paras) for (const it of e.items) if (it.pic) {
+      const pos = hxFirst(it.pic, 'pos'), relV = pos && pos.getAttribute('vertRelTo'), relH = pos && pos.getAttribute('horzRelTo');
+      if (!(relV === 'PAPER' || relV === 'PAGE' || relH === 'PAPER') || pos.getAttribute('treatAsChar') === '1' || it.pic.getAttribute('textWrap') === 'BEHIND_TEXT') continue;
+      const g = await hxPic(zip, manifest, it.pic, { float: true });
+      if (!g || g.w < 30 || g.h < 30 || g.w > 450 || g.h > 450) continue;
+      const pw = 595.3, y0 = g.pos.vAlign === 'BOTTOM' ? 841.9 - g.pos.vOff - g.h : g.pos.vOff, x0 = g.pos.hAlign === 'RIGHT' ? pw - g.pos.hOff - g.w : g.pos.hAlign === 'CENTER' ? (pw - g.w) / 2 + g.pos.hOff : g.pos.hOff;
+      floats.push({ page: e.page, y0, y1: y0 + g.h, x0, x1: x0 + g.w, png: g.png, w: g.w, h: g.h });
+    }
   }
   const out = [];
   for (const q of probs) {
@@ -5079,7 +5089,35 @@ async function hxBuild(f) {
     for (const e of q.sol) for (const it of e.items) if (it.pic) { const g = await hxPic(zip, manifest, it.pic); if (g) solFigs.push(g); }
     out.push({ kind: q.kind, num: q.num, page: q.page, text: lines.join('\n').replace(/\u0001/g, ''), sol: sol.join('\n'), answer, figs, solFigs });
   }
+  out.floats = floats;
   return out;
+}
+/* 종이에 고정된 그림 → 문제: 같이 연 PDF의 같은 쪽에서 문제 상자를 찾아 세로 위치가 가장 많이 겹치는 문제에 붙임.
+   PDF가 없으면 그 쪽에 '그림'을 말하는 그림 없는 문제가 하나뿐일 때만 붙임. 붙인 그림은 다시 붙이지 않음(f.to) */
+async function hxAssignFloats() {
+  const fl = (state.hxFloats || []).filter(f => !f.to); let n = 0; hxAssignFloats.last = [];
+  for (const f of fl) {
+    const onPage = state.items.filter(x => x.hwpx && +x.page === +f.page);
+    let best = null;
+    if (pdf) {
+      const pp = await hxPdfPage(+f.page); if (!pp) continue;
+      const P = await readPage(pp); let found = [];
+      try { found = detect(P, { rules: RULES.rules[state.pub] || [], workbook: false }).found; } catch (e) { }
+      let bo = 0;
+      for (const it of onPage) {
+        const q = found.find(q => q.kind === it.kind && String(q.num) === String(it.num)) || found.find(q => String(q.num) === String(it.num) && it.kind !== '문제' && it.kind !== '예제');
+        if (!q || !q.box) continue;
+        const ov = Math.min(f.y1, q.box.y1) - Math.max(f.y0, q.box.y0), hov = Math.min(f.x1, P.w - 10) - Math.max(f.x0, q.box.x0);   // 가로: 문제 왼쪽 끝부터 쪽 오른쪽까지(옆 그림 포함). 왼쪽 여백 그림은 아님
+        if (ov > bo && hov > f.w * 0.3) { bo = ov; best = it; }   // 그림 폭의 30% 넘게 문제 쪽(문제 왼쪽 끝 오른편)에 있어야
+      }
+    } else {
+      const c = onPage.filter(it => !it.figs.length && /그림/.test(it.text)); if (c.length === 1) best = c[0];
+    }
+    if (!best) continue;
+    best.figs.push({ png: f.png, w: f.w, h: f.h, place: f.x0 > 595.3 * 0.55 ? '오른쪽' : '아래', hwpx: true });
+    f.to = best.file; n++; (hxAssignFloats.last = hxAssignFloats.last || []).push(best.file);
+  }
+  return { n, left: (state.hxFloats || []).filter(f => !f.to).length, files: hxAssignFloats.last };
 }
 /* 파일 이름에 과목·출판사가 있으면 맞춤(예: 미래엔_공통수학1_교과서_2-1.hwpx) */
 const HX_PUBS = ['미래엔', '비상', '천재', '지학사', '동아', '좋은책신사고', '신사고', '금성', '해냄', '씨마스', '와이비엠', 'YBM', '능률', '이투스', '디딤돌', '교학사', '창비', '수경'];
@@ -5101,17 +5139,32 @@ async function loadHwpx(f) {
   const ans = prompt(`문제 ${found.length}개를 찾았습니다. 첫 문제는 ${p0}쪽으로 읽혔습니다.\n실제 교재 쪽 번호와 다르면 첫 문제의 쪽 번호를 적어 주세요(맞으면 그대로 확인).`, String(p0));
   if (ans === null) return;
   if (/^\d+$/.test(ans.trim())) shift = +ans.trim() - p0;
-  if (state.items.length && !confirm(`지금 작업 중인 문제 ${state.items.length}개가 있습니다. HWPX에서 읽은 문제를 뒤에 추가할까요?`)) return;
+  /* 이미 작업한 같은 문제(파일 이름이 같은 HWPX 문제)는 글·단원·검수를 그대로 두고 빠진 그림만 채움 */
+  const fileOf = q => fileName({ page: q.page + shift, kind: q.kind, num: q.num, pdfPage: 0 });
+  const have = new Map(state.items.filter(x => x.hwpx).map(x => [x.file, x]));
+  const dup = found.filter(q => have.has(fileOf(q))), fresh = found.filter(q => !have.has(fileOf(q)));
+  if (dup.length) {
+    if (!confirm(`이미 작업한 문제 ${dup.length}개가 있습니다. 그 문제들은 글·단원·검수 표시를 그대로 두고 빠진 그림만 채웁니다.${fresh.length ? `\n새 문제 ${fresh.length}개는 뒤에 추가합니다.` : ''}\n계속할까요?`)) return;
+  } else if (state.items.length && !confirm(`지금 작업 중인 문제 ${state.items.length}개가 있습니다. HWPX에서 읽은 문제를 뒤에 추가할까요?`)) return;
+  let filled = 0;
+  for (const q of dup) { const it = have.get(fileOf(q)); if (!it.figs.length && q.figs.length) { it.figs = q.figs; filled++; } if (!(it.solFigs || []).length && q.solFigs.length) it.solFigs = q.solFigs; }
+  const floatsNew = (found.floats || []).map(g => ({ ...g, page: g.page + shift }));
+  const sameFloat = (a, b) => a.page === b.page && Math.abs(a.y0 - b.y0) < 1 && Math.abs(a.x0 - b.x0) < 1;
+  state.hxFloats = (state.hxFloats || []).concat(floatsNew.filter(g => !(state.hxFloats || []).some(o => sameFloat(o, g))));
   if (!state.items.length) { state.fileName = f.name; state.pageNo = 1; state.selId = null; }
   const used = new Set(state.items.map(x => x.file)); let ord = state.items.length, first = null;
-  for (const q of found) {
+  for (const q of fresh) {
     const it = { id: 'q' + Date.now().toString(36) + (seq++), hwpx: true, ord: ord++, pdfPage: 0, page: q.page + shift, kind: q.kind, num: q.num, box: null, skipKeys: [], figs: q.figs, solFigs: q.solFigs, answer: q.answer, done: false, edited: false, solY: null, sol: q.sol, text: q.text, unsure: [] };
     const u = suggestUnit(it.text); it.mid = u.mid; it.sub = u.sub; it.file = fileName(it);
     if (used.has(it.file)) it.file = it.file + '_' + it.ord;
     used.add(it.file); state.items.push(it); first = first || it;
   }
-  autoUnits(state.items.filter(x => x.hwpx && x.ord >= ord - found.length)); sortItems(); renderList(); setStep(2); await select(first.id); save();
-  alert(`HWPX에서 문제 ${found.length}개를 읽었습니다(그림 ${found.reduce((n, q) => n + q.figs.length + q.solFigs.length, 0)}개).\n${changed.length ? '파일 이름을 보고 ' + changed.join(', ') + ' 로 맞췄습니다.\n' : ''}지금 과목: ${state.subj}, 출판사: ${state.pub}, 자료 종류: ${state.kind}\n위쪽 출판사·자료 종류·과목이 맞는지 확인하고, 단원은 목록 위쪽 "단원 일괄 지정"으로 한꺼번에 정할 수 있어요.\n정답은 이 파일에 없으면 비어 있으니 "정답과 해설 PDF"로 연결하거나 직접 적어 주세요.`);
+  if (fresh.length) autoUnits(state.items.filter(x => x.hwpx && x.ord >= ord - fresh.length));
+  const fa = await hxAssignFloats();
+  sortItems(); renderList(); setStep(2); await select((first || state.items.find(x => x.hwpx) || state.items[0]).id); save();
+  const floatMsg = fa.n || fa.left ? `\n쪽에 고정된 그림: ${fa.n}개를 문제에 붙였습니다${fa.n ? `(${fa.files.join(', ')})` : ''}${fa.left ? `, ${fa.left}개는 ${pdf ? '어느 문제인지 찾지 못했어요' : '같은 교재 PDF를 열면 위치로 찾아 붙입니다'}` : ''}.` : '';
+  if (dup.length) return alert(`이미 작업한 문제 ${dup.length}개 중 ${filled}개에 빠진 그림을 채웠습니다. 새 문제 ${fresh.length}개를 추가했습니다.${floatMsg}`);
+  alert(`HWPX에서 문제 ${found.length}개를 읽었습니다(그림 ${found.reduce((n, q) => n + q.figs.length + q.solFigs.length, 0)}개).${floatMsg}\n${changed.length ? '파일 이름을 보고 ' + changed.join(', ') + ' 로 맞췄습니다.\n' : ''}지금 과목: ${state.subj}, 출판사: ${state.pub}, 자료 종류: ${state.kind}\n위쪽 출판사·자료 종류·과목이 맞는지 확인하고, 단원은 목록 위쪽 "단원 일괄 지정"으로 한꺼번에 정할 수 있어요.\n정답은 이 파일에 없으면 비어 있으니 "정답과 해설 PDF"로 연결하거나 직접 적어 주세요.`);
 }
 $('#f-hwpx').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
@@ -5206,7 +5259,10 @@ $('#f-pdf').addEventListener('change', async e => {
   hxPdfMap = null;
   if (state.items.some(x => x.hwpx)) {   // HWPX 문제를 읽은 뒤 연 PDF는 원본 대조용: 문제를 지우거나 다시 찾지 않음
     $('#s-from').value = 1; $('#s-to').value = Math.min(pdf.numPages, AUTO_PAGES);
-    renderList(); renderEditor(); return;
+    const fa = await hxAssignFloats(); save();
+    renderList(); renderEditor();
+    if (fa.n) alert(`쪽에 고정된 그림 ${fa.n}개를 PDF의 문제 위치로 찾아 문제에 붙였습니다: ${fa.files.join(', ')}${fa.left ? `\n(${fa.left}개는 어느 문제의 그림인지 찾지 못했어요. 문제 그림이 아닌 설명 그림일 수 있어요)` : ''}\n붙은 그림이 맞는지 확인해 주세요.`);
+    return;
   }
   const saved = loadLocal();
   if (saved && saved.fileName === f.name && saved.items?.length && confirm(`이 PDF로 하던 작업(문제 ${saved.items.length}개)이 있습니다. 이어서 할까요?`)) applyState(saved);
@@ -5776,6 +5832,7 @@ $('#b-tobank').onclick = async () => {
   if (noUnit && !confirm(`단원이 비어 있는 문제가 ${noUnit}개 있습니다. 그대로 저장할까요?`)) return;
   if (!(await ensurePermission(bank.root))) return alert('폴더에 저장할 권한이 없습니다.');
   try {
+    if (state.hxFloats && state.hxFloats.some(f => !f.to)) await hxAssignFloats();
     let hxNo = 0;
     for (const it of list) { await makeImage(it); if (it.hwpx) { if (!(await hxMakeOrig(it))) hxNo++; } else await makeOrig(it); await placeFigs(it); }   // 이미지 문제 사진·교과서 원본 그림을 새로 자르고 그림 자리를 정함(HWPX 문제는 같이 연 PDF에서)
     const n = await saveToBank(bank.root, list);
