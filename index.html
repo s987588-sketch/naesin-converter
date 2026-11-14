@@ -4394,20 +4394,31 @@ function renderList() {
     const U = UNITS[state.subj] || {}, hu = state.hxUnit || {};
     h += `<div class="hxbulk"><button id="ur-open" title="교재 쪽 범위마다 소단원을 정해 두면 그 쪽의 문제에 단원이 붙습니다(같은 교재는 다음에도 기억)">쪽 범위로 단원 정하기</button></div>`;
     h += `<div class="hxbulk"><b>단원 일괄 지정</b><div class="row"><select id="hx-mid"><option value="">(중단원)</option>${Object.keys(U).map(k => `<option ${k === hu.mid ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select><select id="hx-sub"><option value="">(소단원)</option>${(U[hu.mid] || []).map(k => `<option ${k === hu.sub ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></div><div class="row"><button id="hx-empty" title="단원이 비어 있는 문제에만 적용">비어 있는 문제에</button><button id="hx-all" title="목록의 모든 문제에 적용(이미 고른 단원도 바뀜)">모두에</button></div></div>`;
+    const kinds = [...new Set(state.items.map(x => x.kind))], rk = kinds.includes(state.repKind) ? state.repKind : '', nRep = state.items.filter(x => x.rep).length;
+    h += `<div class="hxbulk"><b>대표 문제 일괄</b> <span class="note">지금 ${nRep}개</span><div class="row"><select id="rep-kind" title="이 종류의 문제만"><option value="">(모든 종류)</option>${kinds.map(k => `<option ${k === rk ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select><button id="rep-on" title="고른 종류의 문제를 모두 대표 문제로">대표로</button><button id="rep-off" title="고른 종류의 문제를 모두 대표 문제에서 뺌">해제</button></div></div>`;
   }
   let lastPg = null;
   for (const it of state.items) {
     const gk = it.pdfPage + '|' + (it.hwpx ? it.page : '');
     if (gk !== lastPg) { h += `<div class="grp">${it.page ? it.page + '쪽' : it.pdfPage + '장'}</div>`; lastPg = gk; }
-    h += `<button class="it${it.id === state.selId ? ' sel' : ''}" data-id="${it.id}"><span>${esc(it.file)}</span><span class="st${it.done ? ' ok' : !it.done && it.unsure && it.unsure.length ? ' odd' : ''}">${it.savedAt ? '은행 저장됨' : it.done ? '검수 완료' : it.unsure && it.unsure.length ? `애매한 글자 ${it.unsure.length}` : it.mid ? '' : '단원 미지정'}</span></button>`;
+    h += `<button class="it${it.id === state.selId ? ' sel' : ''}" data-id="${it.id}"><span>${it.rep ? '<span title="대표 문제" style="color:#d4a017">★</span> ' : ''}${esc(it.file)}</span><span class="st${it.done ? ' ok' : !it.done && it.unsure && it.unsure.length ? ' odd' : ''}">${it.savedAt ? '은행 저장됨' : it.done ? '검수 완료' : it.unsure && it.unsure.length ? `애매한 글자 ${it.unsure.length}` : it.mid ? '' : '단원 미지정'}</span></button>`;
   }
   L.innerHTML = h;
   L.querySelector('.it.sel')?.scrollIntoView({ block: 'nearest' });
 }
 $('#list').addEventListener('click', e => { const b = e.target.closest('.it'); if (b) select(b.dataset.id); });
 $('#list').addEventListener('change', e => {
+  if (e.target.id === 'rep-kind') { state.repKind = e.target.value; save(); }
   if (e.target.id === 'hx-mid') { state.hxUnit = { mid: e.target.value, sub: '' }; renderList(); }
   if (e.target.id === 'hx-sub') { state.hxUnit = { ...(state.hxUnit || {}), sub: e.target.value }; }
+});
+$('#list').addEventListener('click', e => {   // 대표 문제 일괄
+  const on = e.target.id === 'rep-on'; if (!on && e.target.id !== 'rep-off') return;
+  const k = state.repKind || '', tgt = state.items.filter(x => !k || x.kind === k);
+  if (!tgt.length) return alert('해당하는 문제가 없습니다.');
+  if (!confirm(`${k || '모든 종류'} 문제 ${tgt.length}개를 대표 문제${on ? '로 정할까요?' : '에서 뺄까요?'}`)) return;
+  for (const x of tgt) x.rep = on;
+  save(); renderList(); renderEditor();
 });
 $('#list').addEventListener('click', e => {
   const all = e.target.id === 'hx-all', empty = e.target.id === 'hx-empty'; if (!all && !empty) return;
@@ -4611,7 +4622,7 @@ ed.addEventListener('change', e => {
   if (t.id === 'e-mid') { it.mid = t.value; it.sub = ''; delete it.unitBy; renderEditor(); }
   if (t.id === 'e-sub') { it.sub = t.value; delete it.unitBy; renderList(); }
   if (t.id === 'e-anstype') { it.ansType = t.value; renderEditor(); }
-  if (t.id === 'e-rep') it.rep = t.checked;
+  if (t.id === 'e-rep') { it.rep = t.checked; renderList(); }
   if (t.id === 'e-img') { it.imageRange = t.value; renderEditor(); }
   if (t.id === 'e-tags') it.tags = t.value.split(/[,，]/).map(x => x.trim()).filter(Boolean);
   if (t.id === 'e-done') it.done = t.checked;
