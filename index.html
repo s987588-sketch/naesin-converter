@@ -4603,7 +4603,7 @@ window.addEventListener('pointerup', async e => {
 
 /* ── 도구줄 ── */
 $('#s-subj').innerHTML = Object.keys(UNITS).map(k => `<option>${k}</option>`).join('');
-$('#s-subj').addEventListener('change', e => { state.subj = e.target.value; renderEditor(); save(); });
+$('#s-subj').addEventListener('change', e => { state.subj = e.target.value; state.hxUnit = null; renderList(); renderEditor(); save(); });   // 목록 위 '단원 일괄 지정'도 새 과목 단원으로
 $('#s-pub').addEventListener('input', e => { state.pub = e.target.value.trim(); renderEditor(); saveSoon(); });
 $('#s-kind').addEventListener('change', e => { state.kind = e.target.value; wbSecShow(); renderEditor(); save(); });
 $('#s-wb').addEventListener('change', e => { state.wbSec = e.target.value; save(); });
@@ -4920,7 +4920,19 @@ async function hxBuild(f) {
   }
   return out;
 }
+/* 파일 이름에 과목·출판사가 있으면 맞춤(예: 미래엔_공통수학1_교과서_2-1.hwpx) */
+const HX_PUBS = ['미래엔', '비상', '천재', '지학사', '동아', '좋은책신사고', '신사고', '금성', '해냄', '씨마스', '와이비엠', 'YBM', '능률', '이투스', '디딤돌', '교학사', '창비', '수경'];
+function hxGuessMeta(name) {
+  const n = name.replace(/\s+/g, ''), out = {};
+  const subj = Object.keys(UNITS).sort((a, b) => b.length - a.length).find(k => n.includes(k.replace(/\s+/g, '')));
+  if (subj) out.subj = subj;
+  const pub = HX_PUBS.find(p => n.includes(p)); if (pub) out.pub = pub;
+  return out;
+}
 async function loadHwpx(f) {
+  const meta = hxGuessMeta(f.name), changed = [];
+  if (meta.subj && meta.subj !== state.subj) { state.subj = meta.subj; $('#s-subj').value = meta.subj; state.hxUnit = null; changed.push(`과목 → ${meta.subj}`); }
+  if (meta.pub && meta.pub !== state.pub) { state.pub = meta.pub; $('#s-pub').value = meta.pub; changed.push(`출판사 → ${meta.pub}`); }
   const found = await hxBuild(f);
   if (!found.length) return alert('이 HWPX에서 문제("문제 N", "예제 N", 중단원 마무리 번호)를 찾지 못했습니다.');
   const p0 = found[0].page;
@@ -4938,7 +4950,7 @@ async function loadHwpx(f) {
     used.add(it.file); state.items.push(it); first = first || it;
   }
   sortItems(); renderList(); setStep(2); await select(first.id); save();
-  alert(`HWPX에서 문제 ${found.length}개를 읽었습니다(그림 ${found.reduce((n, q) => n + q.figs.length + q.solFigs.length, 0)}개).\n위쪽 출판사·자료 종류·과목이 맞는지 확인하고, 단원은 목록 위쪽 "단원 일괄 지정"으로 한꺼번에 정할 수 있어요.\n정답은 이 파일에 없으면 비어 있으니 "정답과 해설 PDF"로 연결하거나 직접 적어 주세요.`);
+  alert(`HWPX에서 문제 ${found.length}개를 읽었습니다(그림 ${found.reduce((n, q) => n + q.figs.length + q.solFigs.length, 0)}개).\n${changed.length ? '파일 이름을 보고 ' + changed.join(', ') + ' 로 맞췄습니다.\n' : ''}지금 과목: ${state.subj}, 출판사: ${state.pub}, 자료 종류: ${state.kind}\n위쪽 출판사·자료 종류·과목이 맞는지 확인하고, 단원은 목록 위쪽 "단원 일괄 지정"으로 한꺼번에 정할 수 있어요.\n정답은 이 파일에 없으면 비어 있으니 "정답과 해설 PDF"로 연결하거나 직접 적어 주세요.`);
 }
 $('#f-hwpx').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
