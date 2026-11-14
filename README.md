@@ -1,1 +1,7 @@
-# naesin-converter
+# 내신교재 문제 변환기
+
+교과서·평가자료·기출(PDF, 한글 HWPX)에서 문제를 찾아 검수하고 문제은행 JSON으로 저장하는 웹 페이지입니다.
+
+- 열기: https://s987588-sketch.github.io/naesin-converter/
+- 이 저장소에는 프로그램(`index.html`)만 있습니다. 교재 파일·문제 데이터는 올라가지 않습니다.
+- 크롬·엣지(PC)에서 쓰세요(폴더 연결 기능 때문).
