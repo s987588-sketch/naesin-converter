@@ -3333,10 +3333,79 @@ const UNIT_HINTS = [
   [/부분집합|포함|⊂/, '집합의 뜻과 표현', '집합 사이의 포함 관계'],
   [/집합|원소/, '집합의 뜻과 표현', '집합의 뜻과 표현'],
 ];
+/* 과목별 문제 인식 규칙: [소단원, 판정 함수(t = 문제 글 + 해설, m = 수식 부분만)]. 위에서부터 먼저 맞는 것.
+   교과서 소단원 이름이 다를 때 기준(요청 5): 긴 나눗셈 → 다항식의 나눗셈, 조립제법 → 나머지정리와 인수정리, 조립제법으로 인수분해 → 인수정리를 이용한 인수분해 */
+const UNIT_RULES = {
+  '공통수학1': (() => {
+    const MAT = t => /행렬|matrix/.test(t);
+    const CPLX = (t, m) => /복소수|허수|켤레/.test(t) || /(^|[^a-zA-Z\\])i([^a-zA-Z]|$)/.test(m);
+    const SQ = m => /\^\{?2\}?/.test(m), INEQ = (t, m) => /부등식/.test(t) || /[<>≤≥]|\\le|\\ge/.test(m);
+    const onlyX = m => !/(^|[^a-zA-Z\\])[a-wyzA-Z](?![a-zA-Z])/.test(m.replace(/\\[a-zA-Z]+/g, ''));
+    const quadDivisor = t => /\$[^$]*\^\{2\}[^$]*\$\s*(으로|로)\s*나누/.test(t);
+    return [
+      ['행렬의 곱셈', t => MAT(t) && /곱|[A-Z]\s*[A-Z](?![a-zA-Z])|[A-Z]\^\{?2/.test(t)],
+      ['행렬의 덧셈, 뺄셈, 실수배', t => MAT(t) && /[A-Z]\s*[+\-]\s*\d*[A-Z]|\d\s*[A-Z](?![a-zA-Z])|실수배|덧셈|뺄셈/.test(t)],
+      ['행렬의 뜻', t => MAT(t)],
+      ['순열', t => /순열|\\mathrm\{P\}|P_\{?\d|일렬로|한 줄로|나열|\d\s*!|n\s*!|계승/.test(t)],
+      ['조합', t => /조합|\\mathrm\{C\}|C_\{?\d|뽑|택하|고르는 방법|선택하/.test(t)],
+      ['합의 법칙과 곱의 법칙', t => /경우의 수|방법의 수|합의 법칙|곱의 법칙|약수의 개수|가짓수|몇 가지/.test(t)],
+      ['ω의 성질', t => /\\omega|ω/.test(t)],
+      ['삼차방정식의 근과 계수와의 관계', t => /세 근|\\gamma|γ/.test(t)],
+      ['음수의 제곱근', t => /\\sqrt\{\s*-|음수의 제곱근/.test(t)],
+      ['항등식과 미정계수', (t, m) => /항등식|미정계수|값에 관계없이|관계없이 항상/.test(t) && !INEQ(t, m)],
+      ['이차방정식의 실근의 조건', t => /두 근이 모두|두 근 사이|사이에 있|근의 분리|다른 한 근은|두 근이 .{0,12}(보다|모두)|양의 근|음의 근|서로 다른 부호/.test(t)],
+      ['연립이차부등식', (t, m) => /연립부등식|연립이차부등식/.test(t) && SQ(m)],
+      ['연립일차부등식', (t, m) => !SQ(m) && (/연립부등식|연립일차부등식/.test(t) || (INEQ(t, m) && /\\begin\{cases\}|\\left\\\{/.test(m)) || /[<≤][^<≤>≥$]*x[^<≤>≥$]*[<≤]/.test(m))],
+      ['절댓값이 있는 일차부등식', (t, m) => !SQ(m) && INEQ(t, m) && /\|[^|$]*x[^|$]*\|/.test(m)],
+      ['이차부등식', (t, m) => SQ(m) && (/부등식/.test(t) || (/[<>≤≥]/.test(m) && /해|성립|범위/.test(t)))],
+      ['부등식의 성질과 일차부등식', (t, m) => /부등식/.test(t) || (/[<>≤≥]/.test(m) && /해를 구|범위/.test(t))],
+      ['부정방정식', t => /부정방정식|(정수|자연수) \$?[a-z]\$?, ?\$?[a-z]|(정수|자연수).{0,20}순서쌍/.test(t)],
+      ['연립이차방정식', (t, m) => /연립방정식|연립이차방정식/.test(t) || /\\begin\{cases\}|\\left\\\{[^$]*=/.test(m)],
+      ['고차방정식의 풀이', (t, m) => /삼차방정식|사차방정식|고차방정식/.test(t) || (/방정식/.test(t) && /\^\{?[34]\}?/.test(m))],
+      ['이차함수의 최대, 최소', t => /최댓값|최솟값|최대|최소/.test(t) && /이차함수|포물선|y\s*=|f\(x\)/.test(t)],
+      ['이차함수와 이차방정식의 관계', t => /이차함수|포물선|그래프/.test(t) && /x\s*\$?\s*축|만나|교점|접하|직선/.test(t)],
+      ['근과 계수의 관계', t => /근과 계수|두 근을|두 근이|두 근의|\\alpha\s*\+\s*\\beta|α\s*\+\s*β|\\alpha\s*\\beta|두 수를 근|을 근으로|를 근으로/.test(t)],
+      ['이차방정식의 근의 판별', t => /판별식|서로 다른 두 실근|중근|허근|실근|근을 판별|이차방정식/.test(t)],
+      ['허수단위와 복소수', t => /실수부분|허수부분|순허수|복소수가 서로 같|서로 같은 복소수|실수가 되도록|허수가 되도록/.test(t)],
+      ['복소수의 사칙연산', (t, m) => CPLX(t, m) && /켤레|\\overline|\\bar|i\^\{|계산|간단히|[+\-×÷]|\\frac/.test(t)],
+      ['허수단위와 복소수', (t, m) => CPLX(t, m)],
+      ['인수정리를 이용한 인수분해', (t, m) => /인수분해/.test(t) && (/조립제법|인수정리/.test(t) || (/\^\{?3\}?/.test(m) && onlyX(m)))],
+      ['다항식의 나눗셈', t => !/조립제법/.test(t) && (/몫|BQ\s*\+\s*R/.test(t) || (/나누어떨어/.test(t) && quadDivisor(t)))],   // 조립제법은 몫을 구해도 나머지정리와 인수정리
+      ['나머지정리와 인수정리', t => /나머지정리|인수정리|조립제법|나머지|나누어떨어|인수를 가/.test(t)],
+      ['여러 가지 인수분해', (t, m) => /인수분해/.test(t) && (/치환|공통부분|복이차|문자가 (두|여러)|내림차순으로 정리/.test(t) || /\^\{?4\}?/.test(m) || /(\([^()]*x[^()]*\)\s*){3,}/.test(m))],
+      ['인수분해 공식', t => /인수분해/.test(t)],
+      ['곱셈공식의 변형', (t, m) => /\\frac\{1\}\{[a-z]\}/.test(m) || (/값/.test(t) && /\^\{?[23]\}?/.test(m) && ((m.match(/(^|\$|\s)[a-z]\s*=/g) || []).length >= 2 || /[a-z]\s*[+\-]\s*[a-z]\s*=/.test(m) || /[a-z]{2}\s*=/.test(m))) || /[a-z]\s*\+\s*[a-z]\s*\+\s*[a-z]\$?\s*의 값/.test(t)],
+      ['곱셈공식', t => /전개/.test(t)],
+      ['다항식의 사칙연산', t => /내림차순|오름차순|동류항|다항식|계산하시오|정리하시오/.test(t)],
+    ];
+  })(),
+};
 function suggestUnit(text) {
-  const subj = state.subj, U = UNITS[subj] || {};
-  for (const [re, mid, sub] of UNIT_HINTS) if (U[mid] && re.test(text)) return { mid, sub };
+  const subj = state.subj, U = UNITS[subj] || {}, t = String(text || '').replace(/\\leq?(?![a-zA-Z])|\\leqslant/g, '≤').replace(/\\geq?(?![a-zA-Z])|\\geqslant/g, '≥').replace(/\\neq?(?![a-zA-Z])/g, '≠');   // LaTeX 부등호도 기호로 보고 판정
+  const rules = UNIT_RULES[subj];
+  if (rules) {
+    const m = (t.match(/\$[^$]*\$/g) || []).join(' ');
+    for (const [sub, test] of rules) {
+      let ok = false; try { ok = test(t, m); } catch (e) { }
+      if (!ok) continue;
+      const mid = Object.keys(U).find(k => U[k].includes(sub));
+      if (mid) return { mid, sub };
+    }
+    return { mid: '', sub: '' };
+  }
+  for (const [re, mid, sub] of UNIT_HINTS) if (U[mid] && (U[mid] || []).includes(sub) && re.test(t)) return { mid, sub };
   return { mid: '', sub: '' };
+}
+/* 새로 찾거나 읽은 문제(읽는 차례대로)의 단원: ① 문제 글·해설로 인식 ② 못 정하면 가까운 쪽(2쪽 안)의 앞·뒤 문제 단원 ③ 쪽 범위 표가 있으면 그것이 먼저.
+   어디서 정했는지 it.unitBy 에 남겨 검수 화면에 보여 줌 */
+function autoUnits(list) {
+  for (const it of list) { const u = suggestUnit(`${it.text || ''}\n${it.sol || ''}`); it.mid = u.mid; it.sub = u.sub; it.unitBy = u.sub ? '문제 글' : ''; }
+  const near = (a, b) => !a.page || !b.page || Math.abs(+a.page - +b.page) <= 2;
+  let prev = null;
+  for (const it of list) { if (it.unitBy === '문제 글') { prev = it; continue; } if (!it.sub && prev && near(it, prev)) { it.mid = prev.mid; it.sub = prev.sub; it.unitBy = '앞 문제'; } }
+  let next = null;
+  for (let i = list.length - 1; i >= 0; i--) { const it = list[i]; if (it.unitBy === '문제 글') { next = it; continue; } if (!it.sub && next && near(it, next)) { it.mid = next.mid; it.sub = next.sub; it.unitBy = '뒤 문제'; } }
+  urAutoFill(list);
 }
 
 /* ── 상태 ── */
@@ -4298,7 +4367,7 @@ async function analyze(from = 1, to = pdf.numPages) {
     const { found, pageNum } = detect(P, carry);
     for (const f of found) { const it = makeItem({ ...f, pdfPage: n }, P, pageNum); await autoFigs(it, P); state.items.push(it); fresh.push(it); }
   }
-  urAutoFill(fresh);
+  autoUnits(fresh);
   sortItems();
 }
 const AUTO_PAGES = 30;   // 이보다 긴 PDF는 장 범위를 골라 나눠서 찾음
@@ -4345,7 +4414,7 @@ $('#list').addEventListener('click', e => {
   const hu = state.hxUnit || {}; if (!hu.mid || !hu.sub) return alert('중단원과 소단원을 먼저 골라 주세요.');
   const tgt = state.items.filter(x => all || !x.mid || !x.sub); if (!tgt.length) return alert('적용할 문제가 없습니다.');
   if (all && !confirm(`목록의 문제 ${tgt.length}개 모두의 단원을 "${hu.mid} > ${hu.sub}" 로 바꿀까요?`)) return;
-  for (const x of tgt) { x.mid = hu.mid; x.sub = hu.sub; }
+  for (const x of tgt) { x.mid = hu.mid; x.sub = hu.sub; x.unitBy = '일괄 지정'; }
   save(); renderList(); renderEditor();
 });
 /* 1단계에서 목록을 두 번 누르면 그 문제를 2단계 검수로 */
@@ -4394,7 +4463,7 @@ async function renderEditor() {
     </div>
     <div class="row">
       <label class="f">중단원<select id="e-mid"><option value="">(고르기)</option>${Object.keys(U).map(k => `<option ${k === it.mid ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
-      <label class="f">소단원<select id="e-sub"><option value="">(고르기)</option>${(U[it.mid] || []).map(k => `<option ${k === it.sub ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
+      <label class="f">소단원<select id="e-sub"><option value="">(고르기)</option>${(U[it.mid] || []).map(k => `<option ${k === it.sub ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>${it.unitBy && it.sub ? `<span class="note" title="자동으로 정한 단원입니다. 틀리면 고르면 됩니다">자동(${esc(it.unitBy)})</span>` : ''}
     </div>
     <div class="row">
       <label class="f">답 형식${it.ansType ? '' : ' <span class="note">(자동)</span>'}<select id="e-anstype">${ANS_TYPES.map(k => `<option ${k === ansTypeOf(it) ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
@@ -4539,8 +4608,8 @@ ed.addEventListener('change', e => {
   const t = e.target;
   it.savedAt = null;
   if (t.id === 'e-kind') { it.kind = t.value; it.file = fileName(it); renderEditor(); }
-  if (t.id === 'e-mid') { it.mid = t.value; it.sub = ''; renderEditor(); }
-  if (t.id === 'e-sub') it.sub = t.value;
+  if (t.id === 'e-mid') { it.mid = t.value; it.sub = ''; delete it.unitBy; renderEditor(); }
+  if (t.id === 'e-sub') { it.sub = t.value; delete it.unitBy; renderList(); }
   if (t.id === 'e-anstype') { it.ansType = t.value; renderEditor(); }
   if (t.id === 'e-rep') it.rep = t.checked;
   if (t.id === 'e-img') { it.imageRange = t.value; renderEditor(); }
@@ -4660,7 +4729,7 @@ function urUnitOf(rows, page) {
 }
 function urApply(rows, all) {
   let n = 0;
-  for (const it of state.items) { const r = urUnitOf(rows, it.page); if (!r || (!all && it.mid && it.sub)) continue; it.mid = r.mid; it.sub = r.sub; n++; }
+  for (const it of state.items) { const r = urUnitOf(rows, it.page); if (!r || (!all && it.mid && it.sub)) continue; it.mid = r.mid; it.sub = r.sub; it.unitBy = '쪽 범위'; n++; }
   return n;
 }
 function urRender(rows) {
@@ -4697,7 +4766,7 @@ for (const [id, all] of [['ur-empty', false], ['ur-all', true]]) $('#' + id).onc
   alert(`문제 ${n}개에 단원을 붙였습니다.${state.items.some(x => !x.page) ? '\n쪽 번호가 없는 문제(기출 등)는 "단원 일괄 지정"이나 문제마다 골라 주세요.' : ''}`);
 };
 /* 새로 찾거나 읽은 문제: 표가 있으면 그 쪽 범위의 단원을 바로 붙임(낱말로 추천한 단원보다 쪽 범위가 먼저) */
-function urAutoFill(list) { const rows = urRows(); if (!rows.length) return; for (const it of list) { const r = urUnitOf(rows, it.page); if (r) { it.mid = r.mid; it.sub = r.sub; } } }
+function urAutoFill(list) { const rows = urRows(); if (!rows.length) return; for (const it of list) { const r = urUnitOf(rows, it.page); if (r) { it.mid = r.mid; it.sub = r.sub; it.unitBy = '쪽 범위'; } } }
 /* ── HWPX 불러오기 ──
    한글(HWPX) 교재 파일은 글·수식·그림이 구조로 들어 있어서 PDF처럼 글꼴을 풀거나 쪽 그림을 읽을 필요가 없습니다.
    문서 순서대로 문단을 읽고, 표지 문단으로 문제를 나눕니다.
@@ -5030,7 +5099,7 @@ async function loadHwpx(f) {
     if (used.has(it.file)) it.file = it.file + '_' + it.ord;
     used.add(it.file); state.items.push(it); first = first || it;
   }
-  urAutoFill(state.items.filter(x => x.hwpx && x.ord >= ord - found.length)); sortItems(); renderList(); setStep(2); await select(first.id); save();
+  autoUnits(state.items.filter(x => x.hwpx && x.ord >= ord - found.length)); sortItems(); renderList(); setStep(2); await select(first.id); save();
   alert(`HWPX에서 문제 ${found.length}개를 읽었습니다(그림 ${found.reduce((n, q) => n + q.figs.length + q.solFigs.length, 0)}개).\n${changed.length ? '파일 이름을 보고 ' + changed.join(', ') + ' 로 맞췄습니다.\n' : ''}지금 과목: ${state.subj}, 출판사: ${state.pub}, 자료 종류: ${state.kind}\n위쪽 출판사·자료 종류·과목이 맞는지 확인하고, 단원은 목록 위쪽 "단원 일괄 지정"으로 한꺼번에 정할 수 있어요.\n정답은 이 파일에 없으면 비어 있으니 "정답과 해설 PDF"로 연결하거나 직접 적어 주세요.`);
 }
 $('#f-hwpx').addEventListener('change', async e => {
