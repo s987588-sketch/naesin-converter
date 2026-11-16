@@ -4352,7 +4352,7 @@ async function reread(it, keepEdits) {
   if (solY) it.sol = solText(extractText(P, { ...it.box, y0: solY }, skip, figs));
   if (it.id === state.selId) renderEditor();
 }
-function sortItems() { state.items.sort((a, b) => (a.hwpx || b.hwpx ? (a.hwpx ? 1e9 : 0) - (b.hwpx ? 1e9 : 0) || a.ord - b.ord : 0) || a.pdfPage - b.pdfPage || (a.box.x0 > (pages[a.pdfPage]?.w || 600) / 2) - (b.box.x0 > (pages[b.pdfPage]?.w || 600) / 2) || a.box.y0 - b.box.y0); }
+function sortItems() { state.items.sort((a, b) => (a.hwpx || b.hwpx ? (a.hwpx ? 1e9 : 0) - (b.hwpx ? 1e9 : 0) || a.ord - b.ord : 0) || a.pdfPage - b.pdfPage || (a.box && b.box ? (a.box.x0 > (pages[a.pdfPage]?.w || 600) / 2) - (b.box.x0 > (pages[b.pdfPage]?.w || 600) / 2) || a.box.y0 - b.box.y0 : (a.ord || 0) - (b.ord || 0))); }
 
 /* 문제 찾기: 고른 장 범위만 읽음. 그 범위의 예전 상자는 새로 찾은 것으로 바꾸고, 다른 장의 상자는 그대로 둠 */
 async function analyze(from = 1, to = pdf.numPages) {
@@ -4554,6 +4554,11 @@ let O_NOTE0 = null;
 async function drawCrop(it) {
   if (O_NOTE0 === null) O_NOTE0 = $('#o-note').textContent;
   if (it.hwpx && pdf) return drawHxRef(it);
+  if (!it.box && it.orig && it.orig.png) {   // 스캔 결과로 만든 문제: 원본 사진
+    const c = $('#crop'), im = await new Promise(ok => { const i = new Image(); i.onload = () => ok(i); i.src = it.orig.png; });
+    if (c) { c.width = im.naturalWidth; c.height = im.naturalHeight; c.getContext('2d').drawImage(im, 0, 0); }
+    $('#oddboxes').innerHTML = ''; $('#solline').hidden = true; cropInfo = null; $('#o-note').textContent = '스캔 원본 사진입니다. 오른쪽 글·수식과 비교해 보세요.'; return;
+  }
   if (!pdf || !it.box) { const c = $('#crop'); if (c) { c.width = 0; c.height = 0; } $('#o-note').textContent = it.hwpx ? 'HWPX에서 읽은 문제라 원본 그림이 없습니다. 오른쪽에서 글·수식을 확인하세요(수식은 보라색, 눌러서 고칠 수 있어요).' : 'PDF를 열지 않아 원본을 못 그립니다.'; return; }   // PDF를 열지 않고 불러온 작업(임시 저장)은 원본을 못 그림
   $('#o-note').textContent = O_NOTE0;
   const P = await readPage(it.pdfPage), s = 3;
@@ -4768,7 +4773,7 @@ $('#b-scanload').onclick = async () => {
   if (!(await ensurePermission(bank.root))) return alert('폴더를 읽을 권한이 없습니다.');
   let top; try { top = await bank.root.getDirectoryHandle(SCAN_DIR); } catch (e) { return alert('아직 _스캔 폴더가 없습니다. 먼저 "스캔 글 맡기기"를 눌러 주세요.'); }
   const results = [];
-  for await (const [n, h] of top.entries()) if (h.kind === 'directory') for await (const [f, fh] of h.entries()) if (fh.kind === 'file' && /^결과.*\.json$/.test(f)) { const r = await readJson(h, f); if (r && Array.isArray(r.문제)) results.push({ n: n + '/' + f, r }); }   // 결과.json, 결과_그림.json …
+  for await (const [n, h] of top.entries()) if (h.kind === 'directory') for await (const [f, fh] of h.entries()) if (fh.kind === 'file' && /^결과.*\.json$/.test(f)) { const r = await readJson(h, f); if (r && Array.isArray(r.문제)) results.push({ n: n + '/' + f, r, dir: h, folder: n }); }   // 결과.json, 결과_그림.json …
   if (!results.length) return alert('아직 결과(결과.json)가 없습니다. Claude에게 "스캔 올렸어"라고 말하고, 결과를 만들었다고 하면 다시 눌러 주세요(드라이브 동기화에 조금 걸릴 수 있어요).');
   results.sort((a, b) => (a.n < b.n ? 1 : -1));   // 최근 폴더 먼저
   let n = 0, memo = [];
@@ -4791,6 +4796,27 @@ $('#b-scanload').onclick = async () => {
     it.imageRange = ''; delete it.image; it.ocr = folder; it.edited = true;
     if (row.메모) memo.push(`${it.file}: ${row.메모}`);
     filled.push(it); n++;
+  }
+  /* 목록에 그 스캔 문제가 없으면(새로고침으로 사라졌거나 다른 작업을 연 경우): _스캔 폴더의 사진·글·그림으로 새로 만듦 */
+  if (!n && !nf) {
+    const latest = results[0].folder, mine = results.filter(x => x.folder === latest), rowsOf = new Map();
+    for (const { r } of mine) for (const row of r.문제) rowsOf.set(row.파일, { ...(rowsOf.get(row.파일) || {}), ...row });
+    const rowsNew = [...rowsOf.values()].filter(row => row.문제 && !state.items.some(x => x.scanFile === row.파일 || x.file === row.파일));
+    if (rowsNew.length && confirm(`지금 목록에 이 스캔 문제가 없습니다(새로고침으로 사라졌을 수 있어요).\n_스캔/${latest} 의 사진·글·그림으로 문제 ${rowsNew.length}개를 새로 만들까요?\n교재·자료 종류·과목은 지금 위쪽 값(${bookName()} · ${state.kind} · ${state.subj})으로 들어갑니다.`)) {
+      const dir = mine[0].dir; let ord = state.items.length;
+      for (const row of rowsNew) {
+        const m = /^p(\d+)_\D*(\d+)$/.exec(row.파일) || [], it = { id: 'q' + Date.now().toString(36) + (seq++), pdfPage: +m[1] || 0, page: '', kind: '문제', num: String(row.번호 || m[2] || ''), box: null, skipKeys: [], figs: [], solFigs: [], answer: row.정답 || '', sol: '', text: String(row.문제), unsure: [], done: false, edited: true, scanFile: row.파일, ocr: latest, ord: ord++ };
+        if (row.답형식) it.ansType = row.답형식;
+        if (Array.isArray(row.그림)) it.figs = row.그림.filter(g => g && g.png).map(g => ({ png: g.png, w: (+g.너비 || 50) / PT_MM, h: (+g.높이 || 30) / PT_MM, place: g.위치 || '오른쪽', redrawn: true }));
+        try { const f = await (await dir.getFileHandle(safeName(row.파일) + '.png')).getFile(); it.orig = { png: await new Promise(ok => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.readAsDataURL(f); }), box: null, page: it.pdfPage }; } catch (e) { }
+        it.file = fileName(it);
+        if (row.메모) memo.push(`${it.file}: ${row.메모}`);
+        state.items.push(it); filled.push(it); n++;
+      }
+      if (filled.length) { autoUnits(filled); sortItems(); setStep(2); await select(filled[0].id); }
+      save(); renderList(); renderEditor();
+      return alert(`문제 ${n}개를 새로 만들었습니다(글·그림·원본 사진). 단원·쪽 번호를 확인하고 "문제은행에 저장"을 누르세요.\n저장 전에 "작업 저장"도 눌러 두면 안전합니다.${memo.length ? '\n\nClaude 메모:\n' + memo.slice(0, 12).join('\n') : ''}`);
+    }
   }
   if (filled.length) autoUnits(filled.filter(it => !it.sub));
   save(); renderList(); renderEditor();
@@ -5356,7 +5382,8 @@ function applyState(s) {
   $('#s-pub').value = state.pub; $('#s-kind').value = state.kind; $('#s-subj').value = state.subj; $('#s-book').value = state.book || ''; $('#s-wb').value = state.wbSec || '소단원 확인'; wbSecShow();
 }
 const LS = 'naesin-converter-v1';
-function save() { try { localStorage.setItem(LS, JSON.stringify(snapshot())); } catch (e) { } }
+let saveWarned = false;
+function save() { try { localStorage.setItem(LS, JSON.stringify(snapshot())); } catch (e) { if (!saveWarned) { saveWarned = true; setTimeout(() => alert('브라우저 저장 공간이 가득 차서 지금 작업이 자동 저장되지 않았습니다(사진이 많으면 생겨요).\n새로고침하거나 창을 닫기 전에 위쪽 "작업 저장"을 눌러 문제은행 폴더(_임시저장)에 저장해 두세요.'), 0); } } }
 let st = null; function saveSoon() { clearTimeout(st); st = setTimeout(save, 600); }
 function loadLocal() { try { return JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { return null; } }
 function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
