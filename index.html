@@ -4755,8 +4755,12 @@ $('#b-scanask').onclick = async () => {
     }
     await writeFile(dir, '요청.json', JSON.stringify({ v: 1, 만든때: d.toISOString(), 교재: bookName(), 과목: state.subj, 자료: state.kind, 출판사: state.pub, PDF: state.fileName || '', 문제: rows,
       안내: '각 사진의 문제를 글로 옮겨 같은 폴더에 결과.json 을 만듭니다: { "v": 1, "문제": [{ "파일": 요청의 파일, "문제": 글(수식은 $…$ LaTeX, 소문항은 줄바꿈 + ⑴), "정답": 있으면, "답형식": 객관식|단답형|서술형, "번호": 사진에 보이는 문제 번호, "메모": 읽기 애매한 곳 }] }' }, null, 1));
+    /* 같은 사진을 압축 파일 하나로도 받음: Claude 대화창에 이 파일 하나만 끌어다 놓으면 됨(드라이브 도구로는 사진을 그림으로 못 받음) */
+    const zip = new JSZip(); zip.file('요청.json', JSON.stringify({ 폴더: folder, 교재: bookName(), 과목: state.subj, 자료: state.kind, 문제: rows }, null, 1));
+    for (const r of rows) { const it = list.find(x => x.file === r.파일); if (it && it.image) zip.file(r.사진, (await (await fetch(it.image.png)).arrayBuffer())); }
+    download(await zip.generateAsync({ type: 'blob' }), `스캔_${folder}.zip`);
     save(); renderList();
-    alert(`문제 ${rows.length}개의 사진을 ${bank.root.name}/${SCAN_DIR}/${folder} 에 올렸습니다.\n드라이브 동기화가 끝나면 Claude에게 "스캔 올렸어"라고 말해 주세요.\nClaude가 결과를 만들었다고 하면 "스캔 글 불러오기"를 누르세요.`);
+    alert(`문제 ${rows.length}개의 사진을 ${bank.root.name}/${SCAN_DIR}/${folder} 에 올리고, 압축 파일(스캔_${folder}.zip)도 내려받았습니다.\nClaude 대화창에 그 압축 파일을 끌어다 놓고 "스캔 올렸어"라고 말해 주세요.\nClaude가 결과를 만들었다고 하면 "스캔 글 불러오기"를 누르세요.`);
   } catch (e) { alert('올리지 못했습니다: ' + e.message); }
 };
 $('#b-scanload').onclick = async () => {
