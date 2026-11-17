@@ -356,6 +356,8 @@ label:has(> input[type=checkbox]), label:has(> input[type=radio]) { display: inl
   <div style="display:flex;flex-direction:column;gap:8px">
     <p class="note">console.anthropic.com 에서 만든 API 키를 넣습니다. 키는 이 컴퓨터의 브라우저에만 저장되고, 스캔 쪽 그림과 함께 Anthropic 서버로만 보내집니다. 채팅에는 붙이지 마세요.</p>
     <label class="f">API 키<input id="api-key" type="password" size="40" placeholder="sk-ant-..." autocomplete="off"></label>
+    <label class="f">그림 규칙 <span class="note">(모든 그림에 항상 적용. 한 그림만 고칠 때는 검수 화면의 '고칠 점' 칸)</span><textarea id="api-figrules" rows="9" style="width:100%;font-size:12.5px"></textarea></label>
+    <label><input type="checkbox" id="api-figcheck"> 그린 뒤 AI가 원본과 비교해 한 번 더 검수(겹침·누락 고치기, 그림마다 API를 한 번 더 써요)</label>
     <label class="f">모델<select id="api-model"><option value="claude-sonnet-5-5">Claude Sonnet 5.5 (권장: 품질·비용 균형)</option><option value="claude-opus-5-5">Claude Opus 5.5 (가장 정확, 비쌈)</option><option value="claude-haiku-5-5">Claude Haiku 5.5 (빠르고 쌈, 그림은 덜 정확)</option></select></label>
     <div class="row" style="justify-content:flex-end"><button id="api-clear" title="이 컴퓨터에서 키 지우기">키 지우기</button><button id="api-cancel">닫기</button><button id="api-save" class="primary">저장</button></div>
   </div>
@@ -4573,6 +4575,7 @@ async function renderEditor() {
     </div>
     <p class="note">출처: <b id="e-src">${esc(sourceText(it))}</b></p>
     ${it.aiNote ? `<p class="oddwarn">⚠ AI가 확인을 부탁한 곳: ${esc(it.aiNote)}</p>` : ''}
+    ${it.figNote ? `<p class="note">그림 검수에서 고친 점: ${esc(it.figNote)}</p>` : ''}
     ${it.unsure && it.unsure.length ? `<p class="oddwarn">⚠ 읽기 애매한 글자 ${it.unsure.length}개: ${[...new Set(it.unsure.map(u => u.ch))].map(ch => `<code>${esc(ch)}</code>`).join('')} — 왼쪽 원본에 빨간 상자로 표시했어요. "낯선 기호 고치기"로 맞는 기호를 정하거나 글을 직접 고친 뒤 검수 완료를 체크하세요.</p>` : ''}
     <div>
       <div class="row" style="justify-content:space-between;align-items:center"><b>문제 글</b><span class="row"><button id="e-learn" title="이 상자 왼쪽 위의 문제 번호 모양을 배워 같은 모양의 문제를 모두 찾습니다">이 모양으로 모두 찾기</button><button id="e-symfix" title="수식 글꼴의 낯선 글자를 기호로 바꾸는 표">낯선 기호 고치기</button><button id="e-reread">원본에서 다시 읽기</button></span></div>
@@ -7001,6 +7004,29 @@ async function bookPrint(items, dz) {
    쪽마다 한 번 API를 부름: 쪽 그림(JPEG) + 지침 → JSON { 쪽, 문제: [{ 번호, 위치(0~1 비율), 문제, 답형식, 그림: [{svg, 너비, 높이}], 확인 }] } */
 const SCAN_MODE = new URLSearchParams(location.search).get('mode') === 'scan';
 const API_LS = 'naesin-scan-api-v1';
+/* 선생님 그림 규칙(2026-11-17 받음). "API 설정"에서 고칠 수 있고, 모든 그림 지침 끝에 붙음 */
+const DEFAULT_FIG_RULES = `[작도 기준]
+- 원본의 배치와 수학적 조건을 확인하고 정밀 벡터 작도로 다시 그릴 것.
+- 흰 배경, 검은 선, 교재 스타일의 글씨체를 사용할 것.
+- 손글씨는 제거하고 인쇄된 필수 표시는 유지할 것.
+- 점 이름은 Roman 대문자, 변수는 수학 이탤릭으로 표기할 것.
+- 수식은 수식 조판으로 처리하고, 글자를 따로 배치해 간격을 맞추지 말 것.
+- 길이 표시 곡선은 원본 또는 요청에 따라 점선/실선을 구분할 것.
+- 길이 숫자 영역에서는 점선을 끊되, 도형의 실선을 흰 배경으로 가리지 말 것.
+- 글자·숫자와 선·원호가 겹치지 않게 하고, 각도 호는 작고 명확하게 그릴 것.
+- 완성본을 직접 열어 겹침과 누락을 검수할 것.
+
+[그림 그릴 때 규칙]
+- 고화질 PNG만 제공할 것.
+- 여러 그림이면 각각 분리해서 그릴 것`;
+const figRules = () => { const c = (() => { try { return JSON.parse(localStorage.getItem('naesin-scan-api-v1')) || {}; } catch (e) { return {}; } })(); return c.figRules != null && String(c.figRules).trim() ? String(c.figRules) : DEFAULT_FIG_RULES; };
+/* SVG로 규칙을 지키는 방법(모델에게): 글자 조판·점선 끊기·분리 */
+const SVG_HOW = `SVG로 지키는 방법:
+- 점 이름은 <text font-family="Times New Roman, serif" font-style="normal">A</text>, 변수(x, a 등)는 <tspan font-style="italic">, 위첨자는 <tspan baseline-shift="super" font-size="70%">, 아래첨자는 baseline-shift="sub". 한 낱말·식은 하나의 <text> 안에(한 글자씩 x좌표로 늘어놓지 말 것).
+- 길이 숫자가 놓일 자리에서는 점선 경로 자체를 두 조각으로 끊는다(흰 사각형으로 덮지 않는다).
+- 글자는 선·원호와 겹치지 않는 자리에, 각도 호는 반지름 작게.
+- 그림이 여러 개면 "그림" 배열에 각각 따로 넣는다(하나의 SVG에 합치지 않음).`;
+const withRules = p => `${p}\n\n${SVG_HOW}\n\n[선생님 그림 규칙 — 반드시 따름]\n${figRules()}`;
 const apiConf = () => { try { return JSON.parse(localStorage.getItem(API_LS)) || {}; } catch (e) { return {}; } };
 const SCAN_PROMPT = `너는 한국 수학 학원 선생님을 돕는다. 이 이미지는 학교 학습지·시험지를 스캔한 한 쪽이다. 쪽 안의 **인쇄된 문제**를 모두 찾아 JSON 하나로만 답한다(설명·코드 울타리 없이).
 형식: {"쪽": "쪽에 인쇄된 쪽 번호(없으면 빈칸)", "문제": [{"번호": "보이는 문항 번호(예: 3, 12)", "위치": [x0, y0, x1, y1], "문제": "문제 글", "답형식": "객관식|단답형|서술형", "그림": [{"svg": "<svg ...>…</svg>", "너비": 숫자(mm), "높이": 숫자(mm)}], "확인": "읽기 애매하거나 손글씨에 가려 확실하지 않은 곳(없으면 빈칸)"}]}
@@ -7019,7 +7045,7 @@ async function svgToPng(svg, mmW) {
   if (!/^\s*<svg[\s>]/i.test(t)) return null;
   if (!/xmlns=/.test(t)) t = t.replace(/<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
   const vb = /viewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(t);
-  const W = Math.round(Math.max(300, Math.min(1400, (mmW || 50) * 12))), H = vb ? Math.round(W * (+vb[2] / +vb[1])) : Math.round(W * 0.6);
+  const W = Math.round(Math.max(600, Math.min(2600, (mmW || 50) * 24))), H = vb ? Math.round(W * (+vb[2] / +vb[1])) : Math.round(W * 0.6);
   t = t.replace(/<svg([^>]*)>/i, (m, a) => '<svg' + a.replace(/\s(width|height)\s*=\s*("[^"]*"|'[^']*')/gi, '') + ` width="${W}" height="${H}">`);
   const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(t);
   try {
@@ -7035,12 +7061,12 @@ async function scanPageJpeg(n) {
   await pg.render({ canvasContext: g, viewport: vp }).promise;
   return c.toDataURL('image/jpeg', 0.85).split(',')[1];
 }
-async function scanCallApi(b64, conf, prompt = SCAN_PROMPT, media = 'image/jpeg') {
+async function scanCallApi(b64, conf, prompt = SCAN_PROMPT, media = 'image/jpeg', extra = []) {
   for (let tryN = 0; tryN < 3; tryN++) {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': conf.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: conf.model || 'claude-sonnet-5-5', max_tokens: 16000, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: media, data: b64 } }, { type: 'text', text: prompt }] }] }),
+      body: JSON.stringify({ model: conf.model || 'claude-sonnet-5-5', max_tokens: 16000, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: media, data: b64 } }, ...extra, { type: 'text', text: prompt }] }] }),
     });
     if (res.status === 429 || res.status === 529 || res.status >= 500) { await new Promise(r => setTimeout(r, 4000 * (tryN + 1))); continue; }
     const j = await res.json().catch(() => ({}));
@@ -7065,7 +7091,7 @@ async function scanConvert(from = 1, to = pdf ? pdf.numPages : 0) {
   let made = 0, notes = [], fail = [];
   for (let n = from; n <= to; n++) {
     scanStatus(`${n} / ${to}쪽 읽는 중…`);
-    let r; try { r = await scanCallApi(await scanPageJpeg(n), conf); } catch (e) { if (/키|크레딧/.test(e.message)) { scanStatus('멈춤'); return alert(e.message); } fail.push(`${n}쪽: ${e.message}`); continue; }
+    let r; try { r = await scanCallApi(await scanPageJpeg(n), conf, withRules(SCAN_PROMPT)); } catch (e) { if (/키|크레딧/.test(e.message)) { scanStatus('멈춤'); return alert(e.message); } fail.push(`${n}쪽: ${e.message}`); continue; }
     scanUsage.in += r.usage.input_tokens || 0; scanUsage.out += r.usage.output_tokens || 0;
     if (!r.data || !Array.isArray(r.data.문제)) { fail.push(`${n}쪽: 결과를 읽지 못함${r.stop === 'max_tokens' ? '(너무 길어 잘림)' : ''}`); continue; }
     const P = await readPage(n), pageNo = /^\d+$/.test(String(r.data.쪽 || '').trim()) ? +r.data.쪽 : '';
@@ -7082,6 +7108,7 @@ async function scanConvert(from = 1, to = pdf ? pdf.numPages : 0) {
         if (r2) it.figs.push({ png: r2.png, w: mmW / PT_MM, h: (+g.높이 || mmW * r2.ratio) / PT_MM, place: '아래', redrawn: true, svg: String(g.svg) });
         else { it.aiNote = (it.aiNote ? it.aiNote + ' / ' : '') + '그림을 그리지 못함'; }
       }
+      if (it.figs.length && conf.figCheck !== false) { scanStatus(`${n}쪽 ${it.num}번 그림 검수 중…`); const w = box.x1 - box.x0, h = box.y1 - box.y0; await reviewFigs(it, await toJpegB64(await cropPng(P, box, Math.max(2, Math.min(6, 1800 / Math.max(w, h))))), conf); }
       it.file = fileName(it);
       if (state.items.some(x => x.file === it.file)) it.file += '_' + (state.items.length + 1);
       state.items.push(it); made++;
@@ -7101,7 +7128,7 @@ const FIG_PROMPT = `이 이미지는 스캔한 수학 문제 하나다. 문제 �
 - 모눈 위 도형은 모눈 칸 수를 정확히 세어 꼭짓점을 같은 칸 교차점에 놓는다.
 - 입체도형은 보이는 모서리는 실선, 보이지 않는 모서리는 점선.
 - 검은 선(stroke-width 1.5), 색칠 #dedede, 글자 serif. 학생 손글씨·풀이·동그라미는 그리지 않는다.
-- 그림이 여러 개(예: 두 도형)면 원본 배치처럼 하나의 SVG에 함께 그린다.
+- 그림이 여러 개면 각각 따로 그린다(배열에 하나씩).
 - 너비·높이는 인쇄 크기(mm).`;
 async function toJpegB64(dataUrl, maxSide = 1800) {
   const im = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = dataUrl; });
@@ -7109,6 +7136,26 @@ async function toJpegB64(dataUrl, maxSide = 1800) {
   c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
   const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(im, 0, 0, c.width, c.height);
   return c.toDataURL('image/jpeg', 0.9).split(',')[1];
+}
+/* 그린 뒤 검수: 첫 그림=원본, 두 번째=다시 그린 그림. 겹침·누락·위치 오류가 있으면 고친 SVG, 없으면 그대로 */
+const FIG_CHECK = `첫 번째 이미지는 스캔 원본 문제, 두 번째 이미지는 그 문제의 그림을 다시 그린 것(PNG)이다. 두 번째 그림을 원본과 비교해 검수한다.
+확인할 것: 빠진 점 이름·길이·각도·표시, 꼭짓점 위치·비율 오류, 글자·숫자와 선·원호의 겹침, 점선/실선 구분, 손글씨가 들어갔는지.
+JSON 하나로만 답한다: {"좋음": true|false, "고친점": "무엇을 고쳤는지(좋음이면 빈칸)", "svg": "고친 전체 SVG(좋음이면 빈칸)"}`;
+async function figReview(srcB64, fig, conf) {
+  try {
+    const pngB64 = await toJpegB64(fig.png, 1600);
+    const r = await scanCallApi(srcB64, conf, withRules(FIG_CHECK) + `\n\n다시 그린 그림의 SVG:\n${String(fig.svg || '').slice(0, 12000)}`, 'image/jpeg', [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: pngB64 } }]);
+    scanUsage.in += r.usage.input_tokens || 0; scanUsage.out += r.usage.output_tokens || 0;
+    if (!r.data || r.data.좋음 === true || !r.data.svg) return { fig, note: '' };
+    const mmW = fig.w * PT_MM, r2 = await svgToPng(r.data.svg, mmW);
+    return r2 ? { fig: { ...fig, png: r2.png, h: mmW * r2.ratio / PT_MM, svg: String(r.data.svg), checked: true }, note: String(r.data.고친점 || '') } : { fig, note: '' };
+  } catch (e) { return { fig, note: '' }; }
+}
+async function reviewFigs(it, srcB64, conf) {
+  if (conf.figCheck === false || !srcB64) return;
+  const out = [];
+  for (const f of it.figs) { if (!f.redrawn || !f.svg) { out.push(f); continue; } const r = await figReview(srcB64, f, conf); out.push(r.fig); if (r.note) it.figNote = (it.figNote ? it.figNote + ' / ' : '') + r.note; }
+  it.figs = out;
 }
 $('#e-figs').addEventListener('click', async e => {
   const it = state.items.find(x => x.id === state.selId); if (!it) return;
@@ -7123,7 +7170,7 @@ $('#e-figs').addEventListener('click', async e => {
     else if (it.orig && it.orig.png) src = it.orig.png;
     else throw new Error('원본 그림이 없습니다(PDF를 열어 주세요)');
     const cur = it.figs.filter(f => f.svg).map(f => f.svg).join('\n');
-    const prompt = FIG_PROMPT + `\n\n문제 글(참고):\n${it.text || ''}` + (cur ? `\n\n지금 그림(SVG, 이것을 원본에 맞게 고친다):\n${cur.slice(0, 12000)}` : '') + (note.trim() ? `\n\n선생님이 고칠 점(꼭 반영): ${note.trim()}` : '');
+    const prompt = withRules(FIG_PROMPT) + `\n\n문제 글(참고):\n${it.text || ''}` + (cur ? `\n\n지금 그림(SVG, 이것을 원본에 맞게 고친다):\n${cur.slice(0, 12000)}` : '') + (note.trim() ? `\n\n선생님이 고칠 점(꼭 반영): ${note.trim()}` : '');
     const r = await scanCallApi(await toJpegB64(src), conf, prompt, 'image/jpeg');
     scanUsage.in += r.usage.input_tokens || 0; scanUsage.out += r.usage.output_tokens || 0;
     const gs = r.data && Array.isArray(r.data.그림) ? r.data.그림 : [];
@@ -7131,13 +7178,14 @@ $('#e-figs').addEventListener('click', async e => {
     for (const g of gs) { const mmW = Math.max(15, Math.min(150, +g.너비 || 50)), r2 = await svgToPng(g.svg, mmW); if (r2) figs.push({ png: r2.png, w: mmW / PT_MM, h: (+g.높이 || mmW * r2.ratio) / PT_MM, place: '아래', redrawn: true, svg: String(g.svg) }); }
     if (!figs.length) throw new Error('새 그림을 받지 못했습니다' + (r.stop === 'max_tokens' ? '(너무 길어 잘림)' : ''));
     it.figsPrev = it.figs; it.figs = figs.concat(it.figs.filter(f => !f.redrawn)); it.edited = true;
+    if (conf.figCheck !== false) { msg.textContent = '원본과 비교해 검수하는 중…'; await reviewFigs(it, await toJpegB64(src), conf); }
     save(); renderEditor(); scanStatus('그림을 다시 그렸습니다');
   } catch (err) { msg.textContent = ''; btn.disabled = false; alert('그림을 다시 그리지 못했습니다: ' + err.message); }
 });
 $('#sc-go').onclick = () => scanConvert().catch(e => alert('변환하지 못했습니다: ' + e.message));
-$('#sc-api').onclick = () => { const c = apiConf(); $('#api-key').value = c.key || ''; $('#api-model').value = c.model || 'claude-sonnet-5-5'; $('#dlg-api').showModal(); };
+$('#sc-api').onclick = () => { const c = apiConf(); $('#api-key').value = c.key || ''; $('#api-model').value = c.model || 'claude-sonnet-5-5'; $('#api-figrules').value = figRules(); $('#api-figcheck').checked = c.figCheck !== false; $('#dlg-api').showModal(); };
 $('#api-cancel').onclick = () => $('#dlg-api').close();
-$('#api-save').onclick = () => { const key = $('#api-key').value.trim(); if (key && !/^sk-ant-/.test(key)) return alert('API 키는 sk-ant- 로 시작합니다. 다시 확인해 주세요.'); try { localStorage.setItem(API_LS, JSON.stringify({ key, model: $('#api-model').value })); } catch (e) { } $('#dlg-api').close(); scanStatus(key ? 'API 키 저장됨' : ''); };
+$('#api-save').onclick = () => { const key = $('#api-key').value.trim(); if (key && !/^sk-ant-/.test(key)) return alert('API 키는 sk-ant- 로 시작합니다. 다시 확인해 주세요.'); try { localStorage.setItem(API_LS, JSON.stringify({ ...apiConf(), key, model: $('#api-model').value, figRules: $('#api-figrules').value, figCheck: $('#api-figcheck').checked })); } catch (e) { } $('#dlg-api').close(); scanStatus(key ? 'API 키 저장됨' : ''); };
 $('#api-clear').onclick = () => { try { localStorage.removeItem(API_LS); } catch (e) { } $('#api-key').value = ''; scanStatus('API 키를 지웠습니다'); };
 if (SCAN_MODE) {
   document.body.classList.add('scanmode');
