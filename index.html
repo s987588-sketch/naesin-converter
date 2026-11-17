@@ -51,6 +51,8 @@ main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1
 .pagebar { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
 #stage { position: relative; margin: 12px auto; width: max-content; }
 #stage canvas { display: block; box-shadow: 0 1px 4px rgba(0,0,0,.2); background: #fff; }
+.scan-only { display: none; } body.scanmode .scan-only { display: inline-flex; gap: 6px; align-items: center; }
+body.scanmode .scan-hide { display: none !important; }
 .hxbulk { padding: 8px; border-bottom: 1px solid var(--line); display: grid; gap: 6px; font-size: 12.5px; } .hxbulk select { max-width: 100%; }
 .box { position: absolute; border: 2px solid rgba(43,76,140,.55); background: rgba(43,76,140,.06); cursor: move; }
 .box.sel { border-color: var(--sel); background: rgba(47,107,255,.10); }
@@ -213,6 +215,7 @@ label:has(> input[type=checkbox]), label:has(> input[type=radio]) { display: inl
   <nav class="tabs"><button id="t-conv" class="on">문제 변환</button><button id="t-design" title="표지·목차·단원 도입·본문 속지 디자인 고르기">디자인</button><button id="t-book">교재 만들기</button></nav>
   <nav class="tabs conv-only" id="steps" aria-label="단계"><button id="st-1" class="on" title="쪽 위에서 문제 상자를 찾고 고치는 단계">1단계 문제 고르기</button><button id="st-2" title="왼쪽 원본을 보며 글·수식·정답·해설을 고치는 단계">2단계 검수</button></nav>
   <span class="conv-only"><label class="f">PDF<input type="file" id="f-pdf" accept="application/pdf"></label></span>
+  <span class="scan-only"><button id="sc-go" class="primary" title="열어 둔 스캔 PDF의 모든 쪽을 AI가 읽어 문제마다 글·수식을 옮기고 그림을 새로 그립니다">변환 시작</button><button id="sc-api" title="Anthropic API 키와 모델">API 설정</button><span id="sc-status" class="note"></span></span>
   <span class="conv-only"><label class="f" title="한글(HWPX) 교재 파일을 열면 글·수식·그림을 구조 그대로 읽어 문제·예제·마무리 문제를 만듭니다. 한글에서 '다른 이름으로 저장' → HWPX">HWPX<input type="file" id="f-hwpx" accept=".hwpx"></label></span>
   <span class="conv-only"><label class="f">찾을 장<span class="row" style="gap:4px;flex-wrap:nowrap"><input id="s-from" type="number" min="1" style="width:64px" aria-label="시작 장"> ~ <input id="s-to" type="number" min="1" style="width:64px" aria-label="끝 장"><button id="b-find">문제 찾기</button></span></label></span>
   <span class="conv-only"><button id="b-scanask" title="글자가 없는 스캔 문제(이미지 문제)의 사진을 문제은행 폴더의 _스캔 폴더에 올립니다. 그다음 Claude에게 &quot;스캔 올렸어&quot;라고 말하면 Claude가 글·수식으로 읽어 결과 파일을 만들어 둡니다">스캔 글 맡기기</button><button id="b-scanload" title="Claude가 _스캔 폴더에 만들어 둔 결과(결과.json)를 읽어 이미지 문제에 글·수식을 채웁니다">스캔 글 불러오기</button></span>
@@ -340,6 +343,15 @@ label:has(> input[type=checkbox]), label:has(> input[type=radio]) { display: inl
     </div>
     <label><input type="checkbox" id="bq-arch"> 보관(교재 만들 때 기본으로 빼기)</label>
     <div class="row" style="justify-content:flex-end"><button id="bq-cancel">취소</button><button id="bq-go" class="primary">문제은행에 저장</button></div>
+  </div>
+</dialog>
+<dialog id="dlg-api" style="max-width:560px;width:92vw">
+  <h2>API 설정</h2>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <p class="note">console.anthropic.com 에서 만든 API 키를 넣습니다. 키는 이 컴퓨터의 브라우저에만 저장되고, 스캔 쪽 그림과 함께 Anthropic 서버로만 보내집니다. 채팅에는 붙이지 마세요.</p>
+    <label class="f">API 키<input id="api-key" type="password" size="40" placeholder="sk-ant-..." autocomplete="off"></label>
+    <label class="f">모델<select id="api-model"><option value="claude-sonnet-5-5">Claude Sonnet 5.5 (권장: 품질·비용 균형)</option><option value="claude-opus-5-5">Claude Opus 5.5 (가장 정확, 비쌈)</option><option value="claude-haiku-5-5">Claude Haiku 5.5 (빠르고 쌈, 그림은 덜 정확)</option></select></label>
+    <div class="row" style="justify-content:flex-end"><button id="api-clear" title="이 컴퓨터에서 키 지우기">키 지우기</button><button id="api-cancel">닫기</button><button id="api-save" class="primary">저장</button></div>
   </div>
 </dialog>
 <dialog id="dlg-ur" style="max-width:640px;width:94vw">
@@ -4402,7 +4414,7 @@ function renderList() {
   for (const it of state.items) {
     const gk = it.pdfPage + '|' + (it.hwpx ? it.page : '');
     if (gk !== lastPg) { h += `<div class="grp">${it.page ? it.page + '쪽' : it.pdfPage + '장'}</div>`; lastPg = gk; }
-    h += `<button class="it${it.id === state.selId ? ' sel' : ''}" data-id="${it.id}"><span>${it.rep ? '<span title="대표 문제" style="color:#d4a017">★</span> ' : ''}${esc(it.file)}</span><span class="st${it.done ? ' ok' : !it.done && it.unsure && it.unsure.length ? ' odd' : ''}">${it.savedAt ? '은행 저장됨' : it.done ? '검수 완료' : it.unsure && it.unsure.length ? `애매한 글자 ${it.unsure.length}` : it.mid ? '' : '단원 미지정'}</span></button>`;
+    h += `<button class="it${it.id === state.selId ? ' sel' : ''}" data-id="${it.id}"><span>${it.rep ? '<span title="대표 문제" style="color:#d4a017">★</span> ' : ''}${esc(it.file)}</span><span class="st${it.done ? ' ok' : !it.done && ((it.unsure && it.unsure.length) || it.aiNote) ? ' odd' : ''}">${it.savedAt ? '은행 저장됨' : it.done ? '검수 완료' : it.unsure && it.unsure.length ? `애매한 글자 ${it.unsure.length}` : it.mid ? '' : '단원 미지정'}</span></button>`;
   }
   L.innerHTML = h;
   L.querySelector('.it.sel')?.scrollIntoView({ block: 'nearest' });
@@ -4484,6 +4496,7 @@ async function renderEditor() {
       <label class="f">태그 <span class="note">(쉼표로 나눔)</span><input id="e-tags" value="${esc((it.tags || []).join(', '))}" size="18" placeholder="예: 신유형, 고난도"></label>
     </div>
     <p class="note">출처: <b id="e-src">${esc(sourceText(it))}</b></p>
+    ${it.aiNote ? `<p class="oddwarn">⚠ AI가 확인을 부탁한 곳: ${esc(it.aiNote)}</p>` : ''}
     ${it.unsure && it.unsure.length ? `<p class="oddwarn">⚠ 읽기 애매한 글자 ${it.unsure.length}개: ${[...new Set(it.unsure.map(u => u.ch))].map(ch => `<code>${esc(ch)}</code>`).join('')} — 왼쪽 원본에 빨간 상자로 표시했어요. "낯선 기호 고치기"로 맞는 기호를 정하거나 글을 직접 고친 뒤 검수 완료를 체크하세요.</p>` : ''}
     <div>
       <div class="row" style="justify-content:space-between;align-items:center"><b>문제 글</b><span class="row"><button id="e-learn" title="이 상자 왼쪽 위의 문제 번호 모양을 배워 같은 모양의 문제를 모두 찾습니다">이 모양으로 모두 찾기</button><button id="e-symfix" title="수식 글꼴의 낯선 글자를 기호로 바꾸는 표">낯선 기호 고치기</button><button id="e-reread">원본에서 다시 읽기</button></span></div>
@@ -5366,7 +5379,8 @@ $('#f-pdf').addEventListener('change', async e => {
   else {
     state.fileName = f.name; state.pageNo = 1; state.items = []; state.selId = null;
     $('#s-from').value = 1; $('#s-to').value = Math.min(pdf.numPages, AUTO_PAGES);
-    if (pdf.numPages <= AUTO_PAGES) await analyze();
+    if (SCAN_MODE) setTimeout(() => scanStatus(`${pdf.numPages}쪽 PDF를 열었습니다. "변환 시작"을 누르세요`), 0);
+    else if (pdf.numPages <= AUTO_PAGES) await analyze();
     else alert(`이 PDF는 ${pdf.numPages}장입니다. 한 번에 찾으면 오래 걸리니 "찾을 장" 범위를 정하고 "문제 찾기"를 눌러 주세요.\n(처음에는 1~${AUTO_PAGES}장으로 맞춰 두었습니다.)`);
   }
   state.fileName = f.name;
@@ -6900,6 +6914,115 @@ async function bookPrint(items, dz) {
 }
 
 /* 시험용 손잡이 */
+/* ── 스캔 변환(별도 화면 ?mode=scan): 스캔 PDF → AI(Claude API)가 문제마다 글·수식 타이핑 + 그림 다시 그리기 ──
+   결과는 지금 변환기의 문제와 같은 모양(state.items)이라 검수 화면·한글 파일(HWPX)·문제은행 저장·단원 자동 인식을 그대로 씀.
+   쪽마다 한 번 API를 부름: 쪽 그림(JPEG) + 지침 → JSON { 쪽, 문제: [{ 번호, 위치(0~1 비율), 문제, 답형식, 그림: [{svg, 너비, 높이}], 확인 }] } */
+const SCAN_MODE = new URLSearchParams(location.search).get('mode') === 'scan';
+const API_LS = 'naesin-scan-api-v1';
+const apiConf = () => { try { return JSON.parse(localStorage.getItem(API_LS)) || {}; } catch (e) { return {}; } };
+const SCAN_PROMPT = `너는 한국 수학 학원 선생님을 돕는다. 이 이미지는 학교 학습지·시험지를 스캔한 한 쪽이다. 쪽 안의 **인쇄된 문제**를 모두 찾아 JSON 하나로만 답한다(설명·코드 울타리 없이).
+형식: {"쪽": "쪽에 인쇄된 쪽 번호(없으면 빈칸)", "문제": [{"번호": "보이는 문항 번호(예: 3, 12)", "위치": [x0, y0, x1, y1], "문제": "문제 글", "답형식": "객관식|단답형|서술형", "그림": [{"svg": "<svg ...>…</svg>", "너비": 숫자(mm), "높이": 숫자(mm)}], "확인": "읽기 애매하거나 손글씨에 가려 확실하지 않은 곳(없으면 빈칸)"}]}
+규칙:
+- 학생 손글씨(풀이·답·동그라미·밑줄·체크)와 이름·반·머리말·쪽 번호는 옮기지 않는다. 인쇄된 문제만.
+- 위치: 쪽 너비·높이를 1로 볼 때 문항 번호부터 보기·그림까지 감싸는 상자(왼쪽 위 0,0).
+- 문제 글: 수식은 $…$ LaTeX. 점·꼭짓점 이름은 \\mathrm{A}, 선분 \\overline{\\mathrm{AB}}, 각 \\angle \\mathrm{B}, 삼각형 \\triangle \\mathrm{ABC}, 사각형 \\square \\mathrm{ABCD}, 닮음 기호 \\backsim, 단위 $3~\\mathrm{cm}$, 지수 x^{2}, 분수 \\frac{a}{b}.
+- 소문항은 줄을 바꾸고 ⑴ ⑵ ⑶. 객관식 선택지는 줄을 바꾸고 ① ② ③ ④ ⑤. 보기 상자는 [보기] 줄, 내용 줄들, [/보기] 줄. 빈칸은 ＿＿＿＿.
+- 문항 번호(예: "문제 3.", "3")는 문제 글에 넣지 않고 "번호"에만.
+- 그림: 문제에 그림·도형·그래프·표가 있으면 깨끗한 선 그림 SVG로 **새로 그린다**. viewBox를 쓰고, 검은 선(stroke-width 1.5), 숨은 선은 점선, 색칠은 #dedede, 글자는 serif. 꼭짓점 이름·길이·각도 등 그림에 있는 정보는 모두 넣는다. 모눈 위 도형은 칸 수를 정확히 세어 같은 칸 좌표로 그린다(닮음·넓이가 맞아야 함). 사진·삽화는 단순한 선 그림으로. 손글씨는 그리지 않는다. 그림이 없으면 "그림": [].
+- 그림 크기는 인쇄했을 때의 크기(mm, 보통 너비 30~80).
+- 앞 쪽에서 이어지는 문제의 뒷부분만 있으면 그 문제는 빼고 "확인"에 적지 않는다.`;
+/* SVG → PNG(흰 바탕, 선명하게 3배). 스크립트·이벤트·바깥 링크는 지움 */
+async function svgToPng(svg, mmW) {
+  let t = String(svg || '').replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*("[^"]*"|'[^']*')/gi, '').replace(/(xlink:)?href\s*=\s*("(?!#)[^"]*"|'(?!#)[^']*')/gi, '');
+  if (!/^\s*<svg[\s>]/i.test(t)) return null;
+  if (!/xmlns=/.test(t)) t = t.replace(/<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+  const vb = /viewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(t);
+  const W = Math.round(Math.max(300, Math.min(1400, (mmW || 50) * 12))), H = vb ? Math.round(W * (+vb[2] / +vb[1])) : Math.round(W * 0.6);
+  t = t.replace(/<svg([^>]*)>/i, (m, a) => '<svg' + a.replace(/\s(width|height)\s*=\s*("[^"]*"|'[^']*')/gi, '') + ` width="${W}" height="${H}">`);
+  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(t);
+  try {
+    const im = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; });
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.drawImage(im, 0, 0, W, H);
+    return { png: c.toDataURL('image/png'), ratio: H / W };
+  } catch (e) { return null; }
+}
+async function scanPageJpeg(n) {
+  const pg = await pdf.getPage(n), v1 = pg.getViewport({ scale: 1 }), s = Math.min(3, 1600 / v1.width), vp = pg.getViewport({ scale: s });
+  const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  await pg.render({ canvasContext: g, viewport: vp }).promise;
+  return c.toDataURL('image/jpeg', 0.85).split(',')[1];
+}
+async function scanCallApi(b64, conf) {
+  for (let tryN = 0; tryN < 3; tryN++) {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': conf.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: conf.model || 'claude-sonnet-5-5', max_tokens: 16000, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } }, { type: 'text', text: SCAN_PROMPT }] }] }),
+    });
+    if (res.status === 429 || res.status === 529 || res.status >= 500) { await new Promise(r => setTimeout(r, 4000 * (tryN + 1))); continue; }
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(res.status === 401 ? 'API 키가 맞지 않습니다("API 설정"에서 다시 넣어 주세요)' : res.status === 400 && /credit|balance/i.test(JSON.stringify(j)) ? 'API 크레딧이 부족합니다(콘솔에서 충전해 주세요)' : `API 오류 ${res.status}: ${(j.error && j.error.message) || ''}`);
+    const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+    const a = txt.indexOf('{'), z = txt.lastIndexOf('}');
+    let data = null; try { data = JSON.parse(txt.slice(a, z + 1)); } catch (e) { }
+    return { data, usage: j.usage || {}, stop: j.stop_reason };
+  }
+  throw new Error('API가 바빠서 응답하지 않습니다. 잠시 뒤 다시 눌러 주세요.');
+}
+const scanUsage = { in: 0, out: 0 };
+function scanStatus(msg) { const el = $('#sc-status'); if (el) el.textContent = msg + (scanUsage.in ? ` · 사용 토큰 입력 ${scanUsage.in.toLocaleString()} / 출력 ${scanUsage.out.toLocaleString()}` : ''); }
+async function scanConvert(from = 1, to = pdf ? pdf.numPages : 0) {
+  const conf = apiConf();
+  if (!conf.key) { $('#dlg-api').showModal(); return alert('먼저 API 키를 넣어 주세요.'); }
+  if (!pdf) return alert('스캔 PDF를 먼저 열어 주세요.');
+  const redo = state.items.filter(x => x.ai && x.pdfPage >= from && x.pdfPage <= to);
+  if (redo.some(x => x.done || x.savedAt) && !confirm(`${from}~${to}장에 검수하거나 저장한 문제가 있습니다. 다시 변환하면 그 쪽의 문제를 새로 만듭니다. 계속할까요?`)) return;
+  if (!confirm(`${to - from + 1}쪽을 변환합니다(쪽마다 AI를 한 번 부릅니다). 계속할까요?`)) return;
+  state.items = state.items.filter(x => !(x.ai && x.pdfPage >= from && x.pdfPage <= to));
+  let made = 0, notes = [], fail = [];
+  for (let n = from; n <= to; n++) {
+    scanStatus(`${n} / ${to}쪽 읽는 중…`);
+    let r; try { r = await scanCallApi(await scanPageJpeg(n), conf); } catch (e) { if (/키|크레딧/.test(e.message)) { scanStatus('멈춤'); return alert(e.message); } fail.push(`${n}쪽: ${e.message}`); continue; }
+    scanUsage.in += r.usage.input_tokens || 0; scanUsage.out += r.usage.output_tokens || 0;
+    if (!r.data || !Array.isArray(r.data.문제)) { fail.push(`${n}쪽: 결과를 읽지 못함${r.stop === 'max_tokens' ? '(너무 길어 잘림)' : ''}`); continue; }
+    const P = await readPage(n), pageNo = /^\d+$/.test(String(r.data.쪽 || '').trim()) ? +r.data.쪽 : '';
+    for (const q of r.data.문제) {
+      if (!q || !String(q.문제 || '').trim()) continue;
+      const b = Array.isArray(q.위치) && q.위치.length === 4 ? q.위치.map(Number) : [0, 0, 1, 1];
+      const box = { x0: Math.max(0, Math.min(b[0], b[2])) * P.w, y0: Math.max(0, Math.min(b[1], b[3])) * P.h, x1: Math.min(1, Math.max(b[0], b[2])) * P.w, y1: Math.min(1, Math.max(b[1], b[3])) * P.h };
+      if (box.x1 - box.x0 < 10 || box.y1 - box.y0 < 6) Object.assign(box, { x0: 0, y0: 0, x1: P.w, y1: P.h });
+      const it = { id: 'q' + Date.now().toString(36) + (seq++), ai: true, pdfPage: n, page: pageNo, kind: '문제', num: String(q.번호 || '').replace(/[^\dA-Za-z가-힣-]/g, '') || String(made + 1), box, skipKeys: [], figs: [], solFigs: [], answer: '', sol: '', text: String(q.문제).trim(), unsure: [], done: false, edited: true, ord: state.items.length };
+      if (/^(객관식|단답형|서술형)$/.test(q.답형식)) it.ansType = q.답형식;
+      if (String(q.확인 || '').trim()) { it.aiNote = String(q.확인).trim(); notes.push(`${n}쪽 ${it.num}번: ${it.aiNote}`); }
+      for (const g of Array.isArray(q.그림) ? q.그림 : []) {
+        const mmW = Math.max(15, Math.min(150, +g.너비 || 50)), r2 = await svgToPng(g.svg, mmW);
+        if (r2) it.figs.push({ png: r2.png, w: mmW / PT_MM, h: (+g.높이 || mmW * r2.ratio) / PT_MM, place: '아래', redrawn: true, svg: String(g.svg) });
+        else { it.aiNote = (it.aiNote ? it.aiNote + ' / ' : '') + '그림을 그리지 못함'; }
+      }
+      it.file = fileName(it);
+      if (state.items.some(x => x.file === it.file)) it.file += '_' + (state.items.length + 1);
+      state.items.push(it); made++;
+    }
+    autoUnits(state.items.filter(x => x.ai && x.pdfPage === n));
+    sortItems(); renderList(); save();
+  }
+  scanStatus(`끝: 문제 ${made}개`);
+  if (state.items[0]) { setStep(2); await select((state.items.find(x => x.ai) || state.items[0]).id); }
+  alert(`문제 ${made}개를 만들었습니다(글·수식·다시 그린 그림).${fail.length ? `\n\n못 읽은 쪽:\n${fail.join('\n')}` : ''}${notes.length ? `\n\n확인이 필요한 곳 ${notes.length}개(목록의 ⚠):\n${notes.slice(0, 10).join('\n')}` : ''}\n\n원본과 비교해 훑어본 뒤 "HWPX 저장"(한글 파일) 또는 "문제은행에 저장"을 누르세요. 중간에 "작업 저장"도 눌러 두면 안전합니다.`);
+}
+$('#sc-go').onclick = () => scanConvert().catch(e => alert('변환하지 못했습니다: ' + e.message));
+$('#sc-api').onclick = () => { const c = apiConf(); $('#api-key').value = c.key || ''; $('#api-model').value = c.model || 'claude-sonnet-5-5'; $('#dlg-api').showModal(); };
+$('#api-cancel').onclick = () => $('#dlg-api').close();
+$('#api-save').onclick = () => { const key = $('#api-key').value.trim(); if (key && !/^sk-ant-/.test(key)) return alert('API 키는 sk-ant- 로 시작합니다. 다시 확인해 주세요.'); try { localStorage.setItem(API_LS, JSON.stringify({ key, model: $('#api-model').value })); } catch (e) { } $('#dlg-api').close(); scanStatus(key ? 'API 키 저장됨' : ''); };
+$('#api-clear').onclick = () => { try { localStorage.removeItem(API_LS); } catch (e) { } $('#api-key').value = ''; scanStatus('API 키를 지웠습니다'); };
+if (SCAN_MODE) {
+  document.body.classList.add('scanmode');
+  document.title = '스캔 변환';
+  const h1 = document.querySelector('header.top h1'); if (h1) h1.textContent = '스캔 변환';
+  for (const id of ['t-design', 't-book', 'steps', 'b-find', 'b-report', 'b-scanask', 'b-scanload', 'f-hwpx', 'f-key', 's-wb']) { const e = $('#' + id); const box = e && (e.closest('span.conv-only') || e.closest('nav') || e); if (box) box.classList.add('scan-hide'); }
+  if (!apiConf().key) setTimeout(() => scanStatus('처음이면 "API 설정"에서 API 키를 넣어 주세요'), 0);
+}
 window.__app = { guessAnsType, textBlocks, renderPreview, coverKit, dzLayout, dzRender, readAnswerKey, linkAnswerKey, state, toHwp, extractText, detect, readPage, hwpxBuild, splitMath, tidyMath, saveToBank, bank, bk, readBank, bkNumbered, bookHwpx, answerHwpx, bookPages, bkRender, setBankRecs: r => { bkRecs = r; } };
 </script>
 </body>
