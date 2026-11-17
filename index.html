@@ -4593,6 +4593,11 @@ async function renderEditor() {
   $('#preview').innerHTML = renderPreview(it.text);
   $('#sol-preview').innerHTML = it.sol ? renderPreview(it.sol) : '<span class="note">해설 없음</span>';
   $('#e-figs').innerHTML = it.figs.map((f, i) => `<figure draggable="true" data-dragfig="figs:${i}" title="해설 칸이나 해설 그림으로 끌어 놓으면 해설 그림이 됩니다"><img src="${f.png}" alt="그림 ${i + 1}" draggable="false"><button data-delfig="${i}">그림 빼기</button></figure>`).join('');
+  {   // 그림 다시 그리기(AI): 원본이 있고 API를 쓰는 화면·문제에서
+    let hasKey = false; try { hasKey = !!JSON.parse(localStorage.getItem('naesin-scan-api-v1') || '{}').key; } catch (e) { }
+    if (((it.box && pdf) || (it.orig && it.orig.png)) && (hasKey || it.ai || document.body.classList.contains('scanmode')))
+      $('#e-figs').insertAdjacentHTML('beforeend', `<div class="fig-ai" style="flex-basis:100%;display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px"><input id="fa-note" size="30" placeholder="그림 고칠 점(선택) 예: D가 C보다 오른쪽"><button id="fa-go" title="원본 부분을 크게 잘라 AI가 그림을 다시 그립니다(API 사용)">${it.figs.length ? '그림 다시 그리기(AI)' : '그림 그리기(AI)'}</button>${it.figsPrev ? '<button id="fa-undo">이전 그림으로</button>' : ''}<span class="note" id="fa-msg"></span></div>`);
+  }
   $('#e-solfigs').innerHTML = (it.solFigs || []).map((f, i) => `<figure draggable="true" data-dragfig="solFigs:${i}" title="문제 칸이나 위 그림 칸으로 끌어 놓으면 문제 그림이 됩니다"><img src="${f.png}" alt="해설 그림 ${i + 1}" draggable="false"><button data-delsolfig="${i}">그림 빼기</button></figure>`).join('') || '<span class="note">없음</span>';
   if ($('#v-conv').classList.contains('step2')) await drawCrop(it);
 }
@@ -4872,7 +4877,8 @@ $('#b-scanload').onclick = async () => {
     const it = state.items.find(x => x.file === row.파일 || x.scanFile === row.파일) || (row.새파일 && state.items.find(x => x.file === row.새파일));
     if (!it) continue;
     /* Claude가 다시 그린 그림: 글을 이미 불러온 문제라도 그림이 없으면 붙임. 크기는 mm */
-    if (Array.isArray(row.그림) && row.그림.length && !it.figs.some(f => f.redrawn)) {
+    if (Array.isArray(row.그림) && row.그림.length && (!it.figs.some(f => f.redrawn) || (row.덮어쓰기 && !(it.figsFrom || []).includes(folder)))) {
+      if (row.덮어쓰기) { it.figsPrev = it.figs; it.figs = it.figs.filter(f => !f.redrawn); (it.figsFrom = it.figsFrom || []).push(folder); }
       it.figs = row.그림.filter(g => g && g.png).map(g => ({ png: g.png, w: (+g.너비 || 50) / PT_MM, h: (+g.높이 || 30) / PT_MM, place: g.위치 || '오른쪽', redrawn: true })).concat(it.figs.filter(f => !f.redrawn));
       nf++;
     }
@@ -7029,12 +7035,12 @@ async function scanPageJpeg(n) {
   await pg.render({ canvasContext: g, viewport: vp }).promise;
   return c.toDataURL('image/jpeg', 0.85).split(',')[1];
 }
-async function scanCallApi(b64, conf) {
+async function scanCallApi(b64, conf, prompt = SCAN_PROMPT, media = 'image/jpeg') {
   for (let tryN = 0; tryN < 3; tryN++) {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': conf.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: conf.model || 'claude-sonnet-5-5', max_tokens: 16000, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } }, { type: 'text', text: SCAN_PROMPT }] }] }),
+      body: JSON.stringify({ model: conf.model || 'claude-sonnet-5-5', max_tokens: 16000, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: media, data: b64 } }, { type: 'text', text: prompt }] }] }),
     });
     if (res.status === 429 || res.status === 529 || res.status >= 500) { await new Promise(r => setTimeout(r, 4000 * (tryN + 1))); continue; }
     const j = await res.json().catch(() => ({}));
@@ -7087,6 +7093,47 @@ async function scanConvert(from = 1, to = pdf ? pdf.numPages : 0) {
   if (state.items[0]) { setStep(2); await select((state.items.find(x => x.ai) || state.items[0]).id); }
   alert(`문제 ${made}개를 만들었습니다(글·수식·다시 그린 그림).${fail.length ? `\n\n못 읽은 쪽:\n${fail.join('\n')}` : ''}${notes.length ? `\n\n확인이 필요한 곳 ${notes.length}개(목록의 ⚠):\n${notes.slice(0, 10).join('\n')}` : ''}\n\n원본과 비교해 훑어본 뒤 "HWPX 저장"(한글 파일) 또는 "문제은행에 저장"을 누르세요. 중간에 "작업 저장"도 눌러 두면 안전합니다.`);
 }
+/* ── 그림 다시 그리기(AI): 원본 부분을 크게 잘라 지금 그림·선생님 메모와 함께 보내고, 더 정확한 SVG로 바꿈. 이전 그림으로 되돌리기 가능 ── */
+const FIG_PROMPT = `이 이미지는 스캔한 수학 문제 하나다. 문제 속 **그림만** 원본과 최대한 똑같게, 깨끗한 선 그림 SVG로 다시 그려 JSON 하나로만 답한다(설명·코드 울타리 없이).
+형식: {"그림": [{"svg": "<svg viewBox=…>…</svg>", "너비": 숫자(mm), "높이": 숫자(mm)}]}
+규칙:
+- 꼭짓점·점의 위치와 비율, 변의 기울기, 각의 크기를 원본에 맞춘다. 원본의 길이·각도 표시(예: 6 cm, 60°), 꼭짓점 이름, 점선, 색칠, 직각 표시, 같은 길이 표시를 빠짐없이 같은 자리에 넣는다.
+- 모눈 위 도형은 모눈 칸 수를 정확히 세어 꼭짓점을 같은 칸 교차점에 놓는다.
+- 입체도형은 보이는 모서리는 실선, 보이지 않는 모서리는 점선.
+- 검은 선(stroke-width 1.5), 색칠 #dedede, 글자 serif. 학생 손글씨·풀이·동그라미는 그리지 않는다.
+- 그림이 여러 개(예: 두 도형)면 원본 배치처럼 하나의 SVG에 함께 그린다.
+- 너비·높이는 인쇄 크기(mm).`;
+async function toJpegB64(dataUrl, maxSide = 1800) {
+  const im = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = dataUrl; });
+  const k = Math.min(1, maxSide / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement('canvas');
+  c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(im, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.9).split(',')[1];
+}
+$('#e-figs').addEventListener('click', async e => {
+  const it = state.items.find(x => x.id === state.selId); if (!it) return;
+  if (e.target.id === 'fa-undo') { if (it.figsPrev) { it.figs = it.figsPrev; delete it.figsPrev; save(); renderEditor(); } return; }
+  if (e.target.id !== 'fa-go') return;
+  const conf = apiConf(); if (!conf.key) { $('#dlg-api').showModal(); return alert('먼저 "API 설정"에서 API 키를 넣어 주세요.'); }
+  const btn = e.target, msg = $('#fa-msg'), note = ($('#fa-note') || {}).value || '';
+  btn.disabled = true; msg.textContent = '그리는 중…(10~30초)';
+  try {
+    let src;
+    if (it.box && pdf) { const P = await readPage(it.pdfPage), w = it.box.x1 - it.box.x0, h = it.box.y1 - it.box.y0; src = await cropPng(P, it.box, Math.max(2, Math.min(6, 1800 / Math.max(w, h)))); }
+    else if (it.orig && it.orig.png) src = it.orig.png;
+    else throw new Error('원본 그림이 없습니다(PDF를 열어 주세요)');
+    const cur = it.figs.filter(f => f.svg).map(f => f.svg).join('\n');
+    const prompt = FIG_PROMPT + `\n\n문제 글(참고):\n${it.text || ''}` + (cur ? `\n\n지금 그림(SVG, 이것을 원본에 맞게 고친다):\n${cur.slice(0, 12000)}` : '') + (note.trim() ? `\n\n선생님이 고칠 점(꼭 반영): ${note.trim()}` : '');
+    const r = await scanCallApi(await toJpegB64(src), conf, prompt, 'image/jpeg');
+    scanUsage.in += r.usage.input_tokens || 0; scanUsage.out += r.usage.output_tokens || 0;
+    const gs = r.data && Array.isArray(r.data.그림) ? r.data.그림 : [];
+    const figs = [];
+    for (const g of gs) { const mmW = Math.max(15, Math.min(150, +g.너비 || 50)), r2 = await svgToPng(g.svg, mmW); if (r2) figs.push({ png: r2.png, w: mmW / PT_MM, h: (+g.높이 || mmW * r2.ratio) / PT_MM, place: '아래', redrawn: true, svg: String(g.svg) }); }
+    if (!figs.length) throw new Error('새 그림을 받지 못했습니다' + (r.stop === 'max_tokens' ? '(너무 길어 잘림)' : ''));
+    it.figsPrev = it.figs; it.figs = figs.concat(it.figs.filter(f => !f.redrawn)); it.edited = true;
+    save(); renderEditor(); scanStatus('그림을 다시 그렸습니다');
+  } catch (err) { msg.textContent = ''; btn.disabled = false; alert('그림을 다시 그리지 못했습니다: ' + err.message); }
+});
 $('#sc-go').onclick = () => scanConvert().catch(e => alert('변환하지 못했습니다: ' + e.message));
 $('#sc-api').onclick = () => { const c = apiConf(); $('#api-key').value = c.key || ''; $('#api-model').value = c.model || 'claude-sonnet-5-5'; $('#dlg-api').showModal(); };
 $('#api-cancel').onclick = () => $('#dlg-api').close();
