@@ -3393,6 +3393,34 @@ const UNIT_RULES = {
     ];
   })(),
 };
+/* 중2-2 (예전 단원표): 도형의 성질 · 닮음 · 피타고라스 · 확률 */
+UNIT_RULES['중2-2'] = (() => {
+  const SIM = t => /닮|∽|\\backsim/.test(t), AREA = t => /넓이|부피/.test(t);
+  return [
+    ['삼각형의 외심', t => /외심|외접원/.test(t)],
+    ['삼각형의 내심', t => /내심|내접원/.test(t)],
+    ['삼각형의 무게중심', t => /무게중심|중선/.test(t)],
+    ['삼각형의 각의 이등분선', t => /각의 이등분선|이등분선/.test(t) && !/수직이등분선/.test(t)],
+    ['평행선 사이의 선분의 길이의 비', t => /평행선 사이|세 평행선|평행한 세 직선|l\s*\/\/\s*m\s*\/\/\s*n/.test(t)],
+    ['삼각형에서 평행선과 선분의 길이의 비', t => /중점 연결|중점을 연결|두 변의 중점/.test(t) || (/평행|\/\/|∥|\\parallel/.test(t) && /삼각형|\\triangle/.test(t) && /길이|비/.test(t) && !/평행사변형/.test(t))],
+    ['닮은 도형의 넓이의 비와 부피의 비', t => AREA(t) && (SIM(t) || /사등분|삼등분|이등분점|축척|축도/.test(t))],
+    ['삼각형의 닮음 조건', t => /닮음 조건|닮음인 이유|SSS|SAS|AA 닮음|닮음이 되는 조건/.test(t) || (SIM(t) && /삼각형|\\triangle/.test(t) && /찾아|닮음인 것|어느 것/.test(t) && !/항상/.test(t))],
+    ['닮은 도형', t => SIM(t) || /닮음비|대응점|대응변|대응각/.test(t)],
+    ['피타고라스 정리의 활용', t => /피타고라스|빗변|직각삼각형/.test(t) && /최단|좌표|두 점 사이|대각선의 길이|직육면체|원뿔|정사면체|입체/.test(t)],
+    ['피타고라스 정리', t => /피타고라스|빗변/.test(t) || (/직각삼각형/.test(t) && /길이/.test(t) && !/합동/.test(t))],
+    ['직각삼각형의 합동', t => /직각삼각형/.test(t) && /합동|RHA|RHS/.test(t)],
+    ['이등변삼각형의 성질', t => /이등변삼각형/.test(t)],
+    ['평행선과 넓이', t => /평행/.test(t) && /넓이/.test(t)],
+    ['평행사변형의 성질', t => /평행사변형/.test(t)],
+    ['여러 가지 사각형', t => /직사각형|마름모|정사각형|사다리꼴|등변/.test(t)],
+    ['여러 가지 사건의 확률', t => /확률/.test(t) && /다시 넣지 않|꺼낸 것을 다시|명중|맞힐|이길|비길|적중|당첨/.test(t)],
+    ['확률의 덧셈과 곱셈', t => /확률/.test(t) && /또는|동시에|연속하여|잇달아|두 번|모두|각각/.test(t)],
+    ['확률의 뜻과 성질', t => /확률/.test(t)],
+    ['여러 가지 경우의 수', t => /일렬로|한 줄로|대표|뽑는|자연수의 개수|만들 수 있는|정수|선분의 개수|삼각형의 개수|악수|경기/.test(t)],
+    ['곱의 법칙', t => /경우의 수/.test(t) && /동시에|그리고|와 .{0,8}를 차례로|곱의 법칙/.test(t)],
+    ['합의 법칙', t => /경우의 수/.test(t)],
+  ];
+})();
 function suggestUnit(text) {
   const subj = state.subj, U = UNITS[subj] || {}, t = String(text || '').replace(/\\leq?(?![a-zA-Z])|\\leqslant/g, '≤').replace(/\\geq?(?![a-zA-Z])|\\geqslant/g, '≥').replace(/\\neq?(?![a-zA-Z])/g, '≠');   // LaTeX 부등호도 기호로 보고 판정
   const rules = UNIT_RULES[subj];
@@ -4405,6 +4433,7 @@ function renderList() {
   let h = `<div class="grp">문제 ${state.items.length}개 · 검수 완료 ${done}개</div>`;
   {   // 단원 한꺼번에: 쪽 범위로 / 하나로
     const U = UNITS[state.subj] || {}, hu = state.hxUnit || {};
+    h += `<div class="hxbulk"><button id="ua-redo" title="문제 글을 보고 소단원을 다시 정합니다. 선생님이 문제마다 직접 고른 단원은 그대로 둡니다">단원 다시 자동으로</button></div>`;
     h += `<div class="hxbulk"><button id="ur-open" title="교재 쪽 범위마다 소단원을 정해 두면 그 쪽의 문제에 단원이 붙습니다(같은 교재는 다음에도 기억)">쪽 범위로 단원 정하기</button></div>`;
     h += `<div class="hxbulk"><b>단원 일괄 지정</b><div class="row"><select id="hx-mid"><option value="">(중단원)</option>${Object.keys(U).map(k => `<option ${k === hu.mid ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select><select id="hx-sub"><option value="">(소단원)</option>${(U[hu.mid] || []).map(k => `<option ${k === hu.sub ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></div><div class="row"><button id="hx-empty" title="단원이 비어 있는 문제에만 적용">비어 있는 문제에</button><button id="hx-all" title="목록의 모든 문제에 적용(이미 고른 단원도 바뀜)">모두에</button></div></div>`;
     const kinds = [...new Set(state.items.map(x => x.kind))], rk = kinds.includes(state.repKind) ? state.repKind : '', nRep = state.items.filter(x => x.rep).length;
@@ -4424,6 +4453,18 @@ $('#list').addEventListener('change', e => {
   if (e.target.id === 'rep-kind') { state.repKind = e.target.value; save(); }
   if (e.target.id === 'hx-mid') { state.hxUnit = { mid: e.target.value, sub: '' }; renderList(); }
   if (e.target.id === 'hx-sub') { state.hxUnit = { ...(state.hxUnit || {}), sub: e.target.value }; }
+});
+$('#list').addEventListener('click', e => {   // 단원 다시 자동으로: 비어 있거나 자동·일괄로 정한 문제만(직접 고른 문제는 둠)
+  if (e.target.id !== 'ua-redo') return;
+  if (!UNIT_RULES[state.subj]) return alert(`${state.subj}는 아직 문제 글로 단원을 정하는 규칙이 없습니다. "단원 일괄 지정"이나 문제마다 골라 주세요.`);
+  const tgt = state.items.filter(x => !x.sub || x.unitBy), keep = state.items.length - tgt.length;
+  if (!tgt.length) return alert('다시 정할 문제가 없습니다(모두 직접 고른 단원).');
+  if (!confirm(`문제 ${tgt.length}개의 소단원을 문제 글로 다시 정할까요?${keep ? `\n(직접 고른 ${keep}개는 그대로 둡니다)` : ''}`)) return;
+  for (const x of tgt) { x.sub = ''; x.mid = ''; delete x.unitBy; }
+  autoUnits(tgt);
+  const cnt = {}; for (const x of tgt) cnt[x.sub || '(못 정함)'] = (cnt[x.sub || '(못 정함)'] || 0) + 1;
+  save(); renderList(); renderEditor();
+  alert('다시 정했습니다:\n' + Object.entries(cnt).map(([k, v]) => `${k}: ${v}개`).join('\n') + '\n\n소단원 옆 "자동(…)" 표시를 보며 틀린 문제만 고르면 됩니다.');
 });
 $('#list').addEventListener('click', e => {   // 대표 문제 일괄
   const on = e.target.id === 'rep-on'; if (!on && e.target.id !== 'rep-off') return;
