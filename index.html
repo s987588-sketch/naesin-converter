@@ -345,6 +345,12 @@ label:has(> input[type=checkbox]), label:has(> input[type=radio]) { display: inl
     <div class="row" style="justify-content:flex-end"><button id="bq-cancel">취소</button><button id="bq-go" class="primary">문제은행에 저장</button></div>
   </div>
 </dialog>
+<dialog id="dlg-ut" style="max-width:1000px;width:96vw">
+  <h2>단원 표 <span class="note" id="ut-subj"></span></h2>
+  <p class="note">줄마다 중단원·소단원을 고르면 바로 바뀝니다. "자동"은 문제 글로 정한 것이고, 여기서 고르면 직접 고른 단원이 됩니다.</p>
+  <div id="ut-rows" style="max-height:68vh;overflow:auto"></div>
+  <div class="row" style="justify-content:flex-end;margin-top:8px"><button id="ut-close" class="primary">닫기</button></div>
+</dialog>
 <dialog id="dlg-api" style="max-width:560px;width:92vw">
   <h2>API 설정</h2>
   <div style="display:flex;flex-direction:column;gap:8px">
@@ -4433,6 +4439,7 @@ function renderList() {
   let h = `<div class="grp">문제 ${state.items.length}개 · 검수 완료 ${done}개</div>`;
   {   // 단원 한꺼번에: 쪽 범위로 / 하나로
     const U = UNITS[state.subj] || {}, hu = state.hxUnit || {};
+    h += `<div class="hxbulk"><button id="ut-open" title="모든 문제를 한 표에 놓고 줄마다 중단원·소단원을 고릅니다">단원 표로 고치기</button></div>`;
     h += `<div class="hxbulk"><button id="ua-redo" title="문제 글을 보고 소단원을 다시 정합니다. 선생님이 문제마다 직접 고른 단원은 그대로 둡니다">단원 다시 자동으로</button></div>`;
     h += `<div class="hxbulk"><button id="ur-open" title="교재 쪽 범위마다 소단원을 정해 두면 그 쪽의 문제에 단원이 붙습니다(같은 교재는 다음에도 기억)">쪽 범위로 단원 정하기</button></div>`;
     h += `<div class="hxbulk"><b>단원 일괄 지정</b><div class="row"><select id="hx-mid"><option value="">(중단원)</option>${Object.keys(U).map(k => `<option ${k === hu.mid ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select><select id="hx-sub"><option value="">(소단원)</option>${(U[hu.mid] || []).map(k => `<option ${k === hu.sub ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></div><div class="row"><button id="hx-empty" title="단원이 비어 있는 문제에만 적용">비어 있는 문제에</button><button id="hx-all" title="목록의 모든 문제에 적용(이미 고른 단원도 바뀜)">모두에</button></div></div>`;
@@ -4454,8 +4461,35 @@ $('#list').addEventListener('change', e => {
   if (e.target.id === 'hx-mid') { state.hxUnit = { mid: e.target.value, sub: '' }; renderList(); }
   if (e.target.id === 'hx-sub') { state.hxUnit = { ...(state.hxUnit || {}), sub: e.target.value }; }
 });
+/* ── 단원 표: 모든 문제의 중단원·소단원을 한 표에서 고침 ── */
+function utRender() {
+  const U = UNITS[state.subj] || {};
+  $('#ut-subj').textContent = `과목: ${state.subj} (다른 과목이면 위쪽 과목을 먼저 바꾸세요)`;
+  const plain = t => String(t || '').replace(/\$([^$]*)\$/g, (m, a) => a.replace(/\\[a-zA-Z]+\s?|[{}]/g, '')).replace(/\s+/g, ' ').slice(0, 70);
+  $('#ut-rows').innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="text-align:left;border-bottom:1px solid var(--line)"><th>문제</th><th>내용</th><th>중단원</th><th>소단원</th><th></th></tr>` +
+    state.items.map((it, i) => `<tr data-ut="${i}" style="border-bottom:1px solid var(--line)"><td style="white-space:nowrap;padding:4px">${esc(it.file)}</td><td style="padding:4px;color:var(--muted)">${esc(plain(it.text))}</td>
+      <td style="padding:4px"><select class="ut-mid"><option value="">(고르기)</option>${Object.keys(U).map(k => `<option ${k === it.mid ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></td>
+      <td style="padding:4px"><select class="ut-sub"><option value="">(고르기)</option>${(U[it.mid] || []).map(k => `<option ${k === it.sub ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></td>
+      <td class="note" style="padding:4px;white-space:nowrap">${it.unitBy && it.sub ? '자동' : ''}</td></tr>`).join('') + '</table>';
+}
+$('#list').addEventListener('click', e => { if (e.target.id !== 'ut-open') return; if (!state.items.length) return; utRender(); $('#dlg-ut').showModal(); });
+$('#ut-rows').addEventListener('change', e => {
+  const tr = e.target.closest('[data-ut]'); if (!tr) return; const it = state.items[+tr.dataset.ut]; if (!it) return;
+  if (e.target.classList.contains('ut-mid')) { it.mid = e.target.value; it.sub = ''; delete it.unitBy; utRender(); }
+  if (e.target.classList.contains('ut-sub')) { it.sub = e.target.value; delete it.unitBy; tr.lastElementChild.textContent = ''; }
+  save();
+});
+$('#ut-close').onclick = () => { $('#dlg-ut').close(); renderList(); renderEditor(); };
 $('#list').addEventListener('click', e => {   // 단원 다시 자동으로: 비어 있거나 자동·일괄로 정한 문제만(직접 고른 문제는 둠)
   if (e.target.id !== 'ua-redo') return;
+  {   // 과목이 안 맞아 보이면(다른 과목 규칙으로 훨씬 많이 맞음) 바꿀지 물음
+    const cur = state.subj, score = sj => { state.subj = sj; const n = state.items.filter(x => suggestUnit(`${x.text || ''}\n${x.sol || ''}`).sub).length; state.subj = cur; return n; };
+    const best = Object.keys(UNIT_RULES).map(sj => [sj, score(sj)]).sort((a, b) => b[1] - a[1])[0], mine = UNIT_RULES[cur] ? score(cur) : 0;
+    if (best && best[0] !== cur && best[1] > mine && best[1] >= state.items.length / 2 && confirm(`지금 과목은 ${cur}인데, 문제 글을 보면 ${best[0]} 문제 같습니다(${best[1]}/${state.items.length}개가 ${best[0]} 단원으로 맞음).\n과목을 ${best[0]}(으)로 바꿀까요?`)) {
+      state.subj = best[0]; $('#s-subj').value = best[0]; state.hxUnit = null;
+      for (const x of state.items) if (x.mid && !(UNITS[best[0]] || {})[x.mid]) { x.mid = ''; x.sub = ''; delete x.unitBy; }   // 다른 과목 단원은 비움
+    }
+  }
   if (!UNIT_RULES[state.subj]) return alert(`${state.subj}는 아직 문제 글로 단원을 정하는 규칙이 없습니다. "단원 일괄 지정"이나 문제마다 골라 주세요.`);
   const tgt = state.items.filter(x => !x.sub || x.unitBy), keep = state.items.length - tgt.length;
   if (!tgt.length) return alert('다시 정할 문제가 없습니다(모두 직접 고른 단원).');
@@ -4487,6 +4521,7 @@ $('#list').addEventListener('dblclick', e => { const b = e.target.closest('.it')
 async function select(id, jump = true) {
   state.selId = id;
   const it = state.items.find(x => x.id === id);
+  if (it && (!pdf || !it.box) && state.step !== 2) { setStep(2); renderList(); return; }   // 원본 쪽을 그릴 수 없으면 바로 검수 화면(단원 칸)으로
   if (it && it.box && jump && it.pdfPage !== state.pageNo) await showPage(it.pdfPage); else if (!it || it.box) drawBoxes();
   renderList(); renderEditor();
 }
