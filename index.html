@@ -4574,6 +4574,7 @@ async function renderEditor() {
       <label class="f">태그 <span class="note">(쉼표로 나눔)</span><input id="e-tags" value="${esc((it.tags || []).join(', '))}" size="18" placeholder="예: 신유형, 고난도"></label>
     </div>
     <p class="note">출처: <b id="e-src">${esc(sourceText(it))}</b></p>
+    ${document.body.classList.contains('scanmode') && !it.ai ? `<p class="oddwarn">⚠ 아직 AI 변환 전인 그림 상자입니다(글·수식·다시 그린 그림이 없음). 위의 <b>"변환 시작"</b>을 누르면 AI가 이 쪽의 문제를 새로 만들고, 그 뒤 여기서 원본과 비교해 검수합니다.</p>` : ''}
     ${it.aiNote ? `<p class="oddwarn">⚠ AI가 확인을 부탁한 곳: ${esc(it.aiNote)}</p>` : ''}
     ${it.figNote ? `<p class="note">그림 검수에서 고친 점: ${esc(it.figNote)}</p>` : ''}
     ${it.unsure && it.unsure.length ? `<p class="oddwarn">⚠ 읽기 애매한 글자 ${it.unsure.length}개: ${[...new Set(it.unsure.map(u => u.ch))].map(ch => `<code>${esc(ch)}</code>`).join('')} — 왼쪽 원본에 빨간 상자로 표시했어요. "낯선 기호 고치기"로 맞는 기호를 정하거나 글을 직접 고친 뒤 검수 완료를 체크하세요.</p>` : ''}
