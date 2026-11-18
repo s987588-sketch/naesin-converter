@@ -7084,10 +7084,12 @@ async function scanConvert(from = 1, to = pdf ? pdf.numPages : 0) {
   const conf = apiConf();
   if (!conf.key) { $('#dlg-api').showModal(); return alert('먼저 API 키를 넣어 주세요.'); }
   if (!pdf) return alert('스캔 PDF를 먼저 열어 주세요.');
-  const redo = state.items.filter(x => x.ai && x.pdfPage >= from && x.pdfPage <= to);
+  const onPages = x => x.pdfPage >= from && x.pdfPage <= to, cut = state.items.filter(x => !x.ai && onPages(x) && !x.savedAt && !x.done);
+  const redo = state.items.filter(x => x.ai && onPages(x));
   if (redo.some(x => x.done || x.savedAt) && !confirm(`${from}~${to}장에 검수하거나 저장한 문제가 있습니다. 다시 변환하면 그 쪽의 문제를 새로 만듭니다. 계속할까요?`)) return;
-  if (!confirm(`${to - from + 1}쪽을 변환합니다(쪽마다 AI를 한 번 부릅니다). 계속할까요?`)) return;
-  state.items = state.items.filter(x => !(x.ai && x.pdfPage >= from && x.pdfPage <= to));
+  if (!confirm(`${to - from + 1}쪽을 변환합니다(쪽마다 AI를 한 번 부릅니다).${cut.length ? `\n자동 자르기·상자 그리기로 만든 그림 상자 ${cut.length}개는 지우고, AI가 문제를 새로 찾습니다.` : ''} 계속할까요?`)) return;
+  const cutIds = new Set(cut.map(x => x.id));
+  state.items = state.items.filter(x => !(x.ai && onPages(x)) && !cutIds.has(x.id));
   let made = 0, notes = [], fail = [];
   for (let n = from; n <= to; n++) {
     scanStatus(`${n} / ${to}쪽 읽는 중…`);
@@ -7192,8 +7194,11 @@ if (SCAN_MODE) {
   document.body.classList.add('scanmode');
   document.title = '스캔 변환';
   const h1 = document.querySelector('header.top h1'); if (h1) h1.textContent = '스캔 변환';
-  for (const id of ['t-design', 't-book', 'steps', 'b-find', 'b-report', 'b-scanask', 'b-scanload', 'f-hwpx', 'f-key', 's-wb']) { const e = $('#' + id); const box = e && (e.closest('span.conv-only') || e.closest('nav') || e); if (box) box.classList.add('scan-hide'); }
+  for (const id of ['t-design', 't-book', 'b-find', 'b-scan', 'b-report', 'b-scanask', 'b-scanload', 'f-hwpx', 'f-key', 's-wb']) { const e = $('#' + id); const box = e && (e.closest('span.conv-only') || e.closest('nav') || e); if (box) box.classList.add('scan-hide'); }
   if (!apiConf().key) setTimeout(() => scanStatus('처음이면 "API 설정"에서 API 키를 넣어 주세요'), 0);
+  /* 단계 단추: 스캔 화면에서는 '쪽 보기' / '검수(원본과 나란히)' */
+  $('#st-1').textContent = '쪽 보기'; $('#st-2').textContent = '검수 (원본과 나란히)';
+  $('#steps').classList.remove('conv-only');
 }
 window.__app = { guessAnsType, textBlocks, renderPreview, coverKit, dzLayout, dzRender, readAnswerKey, linkAnswerKey, state, toHwp, extractText, detect, readPage, hwpxBuild, splitMath, tidyMath, saveToBank, bank, bk, readBank, bkNumbered, bookHwpx, answerHwpx, bookPages, bkRender, setBankRecs: r => { bkRecs = r; } };
 </script>
