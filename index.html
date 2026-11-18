@@ -35,6 +35,27 @@ main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1
 #v-conv.step1 #origside, #v-conv.step1 #editor { display: none; }
 #v-conv.step2 { grid-template-columns: 210px minmax(0, 1fr) minmax(0, 1fr); }
 #v-conv.step2 #pageside { display: none; }
+#cardsview { display: none; }
+#v-conv.step3 { grid-template-columns: minmax(0, 1fr); }
+#v-conv.step3 > .pane { display: none; }
+#v-conv.step3 > #cardsview { display: block; padding: 14px 18px 40px; background: #F4F6FA; overflow: auto; }
+/* 문제 카드: 글·수식·그림·정답을 최종 모양으로 */
+.qcard { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px 10px; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+.qhead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.qnum { background: #1d2330; color: #fff; font-weight: bold; font-size: 14px; border-radius: 7px; padding: 2px 8px; font-family: Arial, sans-serif; }
+.qchip { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: #eef2f7; color: #475467; }
+.qchip.ok { background: #e7f6ec; color: #17803d; } .qchip.warn { background: #fff4e0; color: #b45309; } .qchip.typ { margin-left: auto; }
+.qcard .qbody, .qcard #preview { border: 0; padding: 0; min-height: 0; line-height: 1.9; white-space: pre-wrap; word-break: keep-all; background: none; }
+.qfigs { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-end; gap: 16px; margin: 8px 0 2px; }
+.qfigs img { display: block; max-width: 100%; height: auto; }
+.qside { display: flex; gap: 12px; align-items: flex-start; } .qside > .qbody, .qside > #preview { flex: 1; min-width: 0; } .qside .qfigs { margin: 2px 0 0; }
+.qwarn { color: #b45309; font-size: 13px; margin-top: 6px; }
+.qfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; border-top: 1px dashed var(--line); margin-top: 8px; padding-top: 7px; font-size: 13px; color: var(--muted); }
+.qfoot > span { white-space: nowrap; } .qfoot .qempty { color: #c2410c; } .qfoot .qact { margin-left: auto; display: flex; gap: 6px; }
+.qfoot .qact button { font-size: 12px; padding: 3px 9px; white-space: nowrap; }
+.qgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; align-items: start; }
+.qfilters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 12px; }
+.qfilters button.on { background: #1d2330; color: #fff; border-color: #1d2330; }
 #origside { padding: 12px 14px 40px; display: flex; flex-direction: column; gap: 10px; background: #F4F6FA; }
 #origside .cropwrap { width: 100%; }
 #origside #crop { width: 100%; }
@@ -213,7 +234,7 @@ label:has(> input[type=checkbox]), label:has(> input[type=radio]) { display: inl
 <header class="top">
   <h1>내신교재 문제 변환기</h1>
   <nav class="tabs"><button id="t-conv" class="on">문제 변환</button><button id="t-design" title="표지·목차·단원 도입·본문 속지 디자인 고르기">디자인</button><button id="t-book">교재 만들기</button></nav>
-  <nav class="tabs conv-only" id="steps" aria-label="단계"><button id="st-1" class="on" title="쪽 위에서 문제 상자를 찾고 고치는 단계">1단계 문제 고르기</button><button id="st-2" title="왼쪽 원본을 보며 글·수식·정답·해설을 고치는 단계">2단계 검수</button></nav>
+  <nav class="tabs conv-only" id="steps" aria-label="단계"><button id="st-1" class="on" title="쪽 위에서 문제 상자를 찾고 고치는 단계">1단계 문제 고르기</button><button id="st-2" title="왼쪽 원본을 보며 글·수식·정답·해설을 고치는 단계">2단계 검수</button><button id="st-3" title="모든 문제를 최종 모양 카드로 모아 봅니다">카드로 모아 보기</button></nav>
   <span class="conv-only"><label class="f">PDF<input type="file" id="f-pdf" accept="application/pdf"></label></span>
   <span class="scan-only"><button id="sc-go" class="primary" title="열어 둔 스캔 PDF의 모든 쪽을 AI가 읽어 문제마다 글·수식을 옮기고 그림을 새로 그립니다">변환 시작</button><button id="sc-api" title="Anthropic API 키와 모델">API 설정</button><span id="sc-status" class="note"></span></span>
   <span class="conv-only"><label class="f" title="한글(HWPX) 교재 파일을 열면 글·수식·그림을 구조 그대로 읽어 문제·예제·마무리 문제를 만듭니다. 한글에서 '다른 이름으로 저장' → HWPX">HWPX<input type="file" id="f-hwpx" accept=".hwpx"></label></span>
@@ -248,6 +269,7 @@ label:has(> input[type=checkbox]), label:has(> input[type=radio]) { display: inl
     </div>
     <div id="stage"><canvas id="cv"></canvas><div id="drawrect" hidden></div></div>
   </section>
+  <section id="cardsview"></section>
   <section class="pane" id="list"><p class="empty">PDF를 열면 문제를 자동으로 찾아 여기에 목록을 만듭니다.</p></section>
   <section class="pane" id="origside">
     <div class="row" style="justify-content:space-between;align-items:center"><b>원본</b><span class="row"><button id="o-sol" title="원본에서 해설(풀이)이 시작하는 곳을 누르면 그 아래는 해설 칸으로 갑니다">해설 시작 위치 고르기</button><button id="o-solx" title="해설 나누기를 없애고 상자 전체를 문제로">해설 나누기 없애기</button></span></div>
@@ -4585,7 +4607,7 @@ async function renderEditor() {
       ${symBar('body')}
       <textarea id="body" spellcheck="false">${esc(it.text)}</textarea>
     </div>
-    <div><b>미리보기</b><div id="preview"></div></div>
+    <div><b>최종 모양</b> <span class="note">(글·수식·그림·정답이 합쳐진 모양. 고치면 바로 바뀜)</span><div class="qcard" id="qcard"></div></div>
     <div><b>해설</b> <span class="note">(정답·해설지에 들어감. 비워 두면 '해설 없음'으로 표시)</span> ${meOpenBtn('e-sol', '해설 고치기')}${symBar('e-sol')}<textarea id="e-sol" spellcheck="false" style="width:100%;min-height:80px;font-family:Consolas,'Malgun Gothic',monospace">${esc(it.sol || '')}</textarea></div>
     <div><b>해설 미리보기</b><div id="sol-preview"></div></div>
     <div class="row">
@@ -4594,7 +4616,7 @@ async function renderEditor() {
       <span class="sp"></span>
       <button id="e-prev">◀ 이전 문제</button><button id="e-next" class="primary">다음 문제 ▶</button>
     </div>`;
-  $('#preview').innerHTML = renderPreview(it.text);
+  paintCard(it);
   $('#sol-preview').innerHTML = it.sol ? renderPreview(it.sol) : '<span class="note">해설 없음</span>';
   $('#e-figs').innerHTML = it.figs.map((f, i) => `<figure draggable="true" data-dragfig="figs:${i}" title="해설 칸이나 해설 그림으로 끌어 놓으면 해설 그림이 됩니다"><img src="${f.png}" alt="그림 ${i + 1}" draggable="false"><button data-delfig="${i}">그림 빼기</button></figure>`).join('');
   {   // 그림 다시 그리기(AI): 원본이 있고 API를 쓰는 화면·문제에서
@@ -4687,14 +4709,54 @@ $('#o-solx').onclick = async () => {
 };
 /* 2단계로 바꾸기 */
 function setStep(n) {
-  $('#v-conv').classList.toggle('step1', n === 1); $('#v-conv').classList.toggle('step2', n === 2);
-  $('#st-1').classList.toggle('on', n === 1); $('#st-2').classList.toggle('on', n === 2);
+  for (const k of [1, 2, 3]) { $('#v-conv').classList.toggle('step' + k, n === k); $('#st-' + k).classList.toggle('on', n === k); }
   state.step = n; setSolPick(false);
+  if (n === 3) return renderCards();
   if (n === 2 && !state.selId && state.items[0]) return select(state.items[0].id);
   if (n === 1) showPage(state.pageNo); else renderEditor();
 }
 $('#st-1').onclick = () => setStep(1);
 $('#st-2').onclick = () => { if (!state.items.length) return alert('먼저 1단계에서 문제를 찾아 주세요.'); setStep(2); };
+$('#st-3').onclick = () => { if (!state.items.length) return alert('먼저 1단계에서 문제를 찾아 주세요.'); setStep(3); };
+/* ── 문제 카드: 한 문제의 글·수식·그림·정답을 최종 모양으로(검수 화면 오른쪽, 카드로 모아 보기) ── */
+const CARD_PX_MM = 3.2;   // 화면에서 그림 1mm = 3.2px(인쇄 크기 비율대로)
+const cardWarn = it => it.aiNote || (it.unsure && it.unsure.length ? `읽기 애매한 글자 ${it.unsure.length}개` : '');
+function cardInner(it, opt = {}) {
+  const n = String(it.num || ''), num = (/^\d$/.test(n) ? '0' + n : n) || '?';
+  const kind = it.kind && it.kind !== '문제' ? `<span class="qchip">${esc(it.kind)}</span>` : '';
+  const st = it.done ? '<span class="qchip ok">✓ 검수 완료</span>' : cardWarn(it) ? '<span class="qchip warn">⚠ 확인 필요</span>' : '';
+  const figs = (it.figs || []).filter(f => f.png);
+  const img = imageRangeOf(it) && it.orig && it.orig.png && !String(it.text || '').trim();
+  const figH = img ? `<div class="qfigs"><img src="${it.orig.png}" alt="사진 문제" style="width:100%"></div>`
+    : figs.length ? `<div class="qfigs">${figs.map((f, i) => `<img src="${f.png}" alt="그림 ${i + 1}" style="width:${Math.round((f.w || 140) * PT_MM * CARD_PX_MM)}px">`).join('')}</div>` : '';
+  const bodyH = opt.live ? '<div id="preview"></div>' : `<div class="qbody">${renderPreview(it.text || '')}</div>`;
+  const side = figs.length && !img && figs.every(f => f.place === '오른쪽');
+  const ans = String(it.answer || '').trim();
+  return `<div class="qhead"><span class="qnum">${esc(num)}</span>${kind}${it.sub ? `<span class="qchip">${esc(it.sub)}</span>` : ''}${st}<span class="qchip typ">${esc(ansTypeOf(it))}</span></div>`
+    + (side ? `<div class="qside">${bodyH}${figH}</div>` : bodyH + figH)
+    + (cardWarn(it) && !it.done ? `<div class="qwarn">⚠ ${esc(cardWarn(it))}</div>` : '')
+    + `<div class="qfoot"><span>정답 ${ans ? `<b style="color:var(--ink,#1d2330);font-weight:normal">${renderPreview(ans)}</b>` : '<span class="qempty">비어 있음</span>'}</span><span>출처 ${esc(sourceText(it))}</span>`
+    + (opt.actions ? `<span class="qact"><button data-qedit="${it.id}">고치기</button><button data-qdone="${it.id}">${it.done ? '검수 완료 풀기' : '✓ 검수 완료'}</button></span>` : '') + '</div>';
+}
+function paintCard(it) {
+  const c = $('#qcard'); if (!c) return;
+  c.innerHTML = cardInner(it, { live: true });
+  $('#preview').innerHTML = renderPreview(it.text || '');
+}
+let cardFilter = 'all';
+const CARD_FILTERS = [['all', '전체', () => true], ['warn', '확인 필요', it => !it.done && !!cardWarn(it)], ['noans', '정답 없음', it => !String(it.answer || '').trim()], ['todo', '검수 전', it => !it.done], ['done', '검수 완료', it => !!it.done]];
+function renderCards() {
+  const V = $('#cardsview'), F = CARD_FILTERS.find(f => f[0] === cardFilter) || CARD_FILTERS[0];
+  const list = state.items.filter(F[2]);
+  V.innerHTML = `<div class="qfilters"><b style="margin-right:6px">카드로 모아 보기</b>${CARD_FILTERS.map(([k, l, fn]) => `<button data-qf="${k}" class="${k === F[0] ? 'on' : ''}">${l} ${state.items.filter(fn).length}</button>`).join('')}<span class="note" style="margin-left:6px">"고치기"를 누르면 그 문제의 검수 화면으로 갑니다</span></div>`
+    + (list.length ? `<div class="qgrid">${list.map(it => `<div class="qcard" data-qid="${it.id}">${cardInner(it, { actions: true })}</div>`).join('')}</div>` : '<p class="empty">해당하는 문제가 없습니다.</p>');
+}
+$('#cardsview').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.qf) { cardFilter = b.dataset.qf; return renderCards(); }
+  if (b.dataset.qedit) { setStep(2); return select(b.dataset.qedit); }
+  if (b.dataset.qdone) { const it = state.items.find(x => x.id === b.dataset.qdone); if (!it) return; it.done = !it.done; save(); renderList(); renderCards(); }
+});
 async function figPng(it, r) {
   const P = await readPage(it.pdfPage), s = 4;
   const vp = P.page.getViewport({ scale: s });
@@ -4710,10 +4772,10 @@ ed.addEventListener('input', e => {
   const t = e.target;
   it.savedAt = null;
   if (t.id === 'body') { it.text = t.value; it.edited = true; $('#preview').innerHTML = renderPreview(it.text); }
+  if (t.id === 'e-ans') { it.answer = t.value; paintCard(it); }
   if (t.id === 'e-file') it.file = t.value.trim();
   if (t.id === 'e-page') { it.page = t.value.trim(); it.file = fileName(it); $('#e-file').value = it.file; }
   if (t.id === 'e-num') { it.num = t.value.trim(); it.file = fileName(it); $('#e-file').value = it.file; }
-  if (t.id === 'e-ans') it.answer = t.value;
   if (t.id === 'e-sol') { it.sol = t.value; it.edited = true; it.solEdited = true; $('#sol-preview').innerHTML = it.sol ? renderPreview(it.sol) : '<span class="note">해설 없음</span>'; }
   if (t.id === 'e-page' || t.id === 'e-num') $('#e-src').textContent = sourceText(it);
   saveSoon();
@@ -4729,7 +4791,7 @@ ed.addEventListener('change', e => {
   if (t.id === 'e-rep') { it.rep = t.checked; renderList(); }
   if (t.id === 'e-img') { it.imageRange = t.value; renderEditor(); }
   if (t.id === 'e-tags') it.tags = t.value.split(/[,，]/).map(x => x.trim()).filter(Boolean);
-  if (t.id === 'e-done') it.done = t.checked;
+  if (t.id === 'e-done') { it.done = t.checked; paintCard(it); }
   renderList(); drawBoxes(); save();
 });
 ed.addEventListener('click', async e => {
