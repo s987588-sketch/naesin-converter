@@ -233,7 +233,7 @@ label:has(> input[type=checkbox]), label:has(> input[type=radio]) { display: inl
 <body>
 <header class="top">
   <h1>내신교재 문제 변환기</h1>
-  <nav class="tabs"><button id="t-conv" class="on">문제 변환</button><button id="t-design" title="표지·목차·단원 도입·본문 속지 디자인 고르기">디자인</button><button id="t-book">교재 만들기</button></nav>
+  <nav class="tabs"><button id="t-conv" class="on" title="교과서·평가자료 PDF·HWPX(글자가 있는 파일). API 키 없이 됩니다">문제 변환</button><button id="t-scan" title="스캔 PDF(학습지·시험지): AI가 글·수식을 옮기고 그림을 새로 그립니다(API 키 필요)">스캔 변환</button><button id="t-design" title="표지·목차·단원 도입·본문 속지 디자인 고르기">디자인</button><button id="t-book">교재 만들기</button></nav>
   <nav class="tabs conv-only" id="steps" aria-label="단계"><button id="st-1" class="on" title="쪽 위에서 문제 상자를 찾고 고치는 단계">1단계 문제 고르기</button><button id="st-2" title="왼쪽 원본을 보며 글·수식·정답·해설을 고치는 단계">2단계 검수</button><button id="st-3" title="모든 문제를 최종 모양 카드로 모아 봅니다">카드로 모아 보기</button></nav>
   <span class="conv-only"><label class="f">PDF<input type="file" id="f-pdf" accept="application/pdf"></label></span>
   <span class="scan-only"><button id="sc-go" class="primary" title="열어 둔 스캔 PDF의 모든 쪽을 AI가 읽어 문제마다 글·수식을 옮기고 그림을 새로 그립니다">변환 시작</button><button id="sc-api" title="Anthropic API 키와 모델">API 설정</button><span id="sc-status" class="note"></span></span>
@@ -5546,7 +5546,8 @@ $('#f-pdf').addEventListener('change', async e => {
   else {
     state.fileName = f.name; state.pageNo = 1; state.items = []; state.selId = null;
     $('#s-from').value = 1; $('#s-to').value = Math.min(pdf.numPages, AUTO_PAGES);
-    if (SCAN_MODE) setTimeout(() => scanStatus(`${pdf.numPages}쪽 PDF를 열었습니다. "변환 시작"을 누르세요`), 0);
+    if (!isScan() && isScanPage(await readPage(1)) && confirm('글자가 없는 스캔 파일 같습니다. "스캔 변환" 탭으로 바꿔서 AI로 변환할까요?\n(취소하면 지금 탭에서 그림 상자로 자릅니다)')) setView('scan');
+    if (isScan()) setTimeout(() => scanStatus(`${pdf.numPages}쪽 PDF를 열었습니다. "변환 시작"을 누르세요`), 0);
     else if (pdf.numPages <= AUTO_PAGES) await analyze();
     else alert(`이 PDF는 ${pdf.numPages}장입니다. 한 번에 찾으면 오래 걸리니 "찾을 장" 범위를 정하고 "문제 찾기"를 눌러 주세요.\n(처음에는 1~${AUTO_PAGES}장으로 맞춰 두었습니다.)`);
   }
@@ -6552,14 +6553,17 @@ function bkSave() { const { subj, kinds, units, order, off, two, arch, name, gri
 /* 화면: 'conv' 문제 변환 | 'design' 디자인 | 'book' 교재 만들기 (true/false 는 예전 호출: 교재/변환) */
 function setView(v) {
   v = v === true ? 'book' : v === false ? 'conv' : v;
+  const scan = v === 'scan'; if (scan) v = 'conv';
+  setScanMode(scan);
   const book = v === 'book';
   document.body.classList.toggle('book', book); document.body.classList.toggle('design', v === 'design');
   $('#v-conv').hidden = v !== 'conv'; $('#v-book').hidden = !book; $('#v-design').classList.toggle('off', v !== 'design');
-  $('#t-conv').classList.toggle('on', v === 'conv'); $('#t-book').classList.toggle('on', book); $('#t-design').classList.toggle('on', v === 'design');
+  $('#t-conv').classList.toggle('on', v === 'conv' && !scan); $('#t-scan').classList.toggle('on', scan); $('#t-book').classList.toggle('on', book); $('#t-design').classList.toggle('on', v === 'design');
   if (v === 'design') coverKit().catch(e => alert(e.message));
   if (book && !bkRecs.length && bank.root) bkLoad(); else if (book) bkRender();
 }
 $('#t-conv').onclick = () => setView('conv');
+$('#t-scan').onclick = () => setView('scan');
 $('#t-design').onclick = () => setView('design');
 $('#t-book').onclick = () => setView('book');
 
@@ -7093,7 +7097,7 @@ async function bookPrint(items, dz) {
 /* ── 스캔 변환(별도 화면 ?mode=scan): 스캔 PDF → AI(Claude API)가 문제마다 글·수식 타이핑 + 그림 다시 그리기 ──
    결과는 지금 변환기의 문제와 같은 모양(state.items)이라 검수 화면·한글 파일(HWPX)·문제은행 저장·단원 자동 인식을 그대로 씀.
    쪽마다 한 번 API를 부름: 쪽 그림(JPEG) + 지침 → JSON { 쪽, 문제: [{ 번호, 위치(0~1 비율), 문제, 답형식, 그림: [{svg, 너비, 높이}], 확인 }] } */
-const SCAN_MODE = new URLSearchParams(location.search).get('mode') === 'scan';
+const isScan = () => document.body.classList.contains('scanmode');
 const API_LS = 'naesin-scan-api-v1';
 /* 선생님 그림 규칙(2026-11-17 받음). "API 설정"에서 고칠 수 있고, 모든 그림 지침 끝에 붙음 */
 const DEFAULT_FIG_RULES = `[작도 기준]
@@ -7321,16 +7325,16 @@ $('#sc-api').onclick = () => { const c = apiConf(); $('#api-key').value = c.key 
 $('#api-cancel').onclick = () => $('#dlg-api').close();
 $('#api-save').onclick = () => { const key = $('#api-key').value.trim(); if (key && !/^sk-ant-/.test(key)) return alert('API 키는 sk-ant- 로 시작합니다. 다시 확인해 주세요.'); try { localStorage.setItem(API_LS, JSON.stringify({ ...apiConf(), key, model: $('#api-model').value, figRules: $('#api-figrules').value, figCheck: $('#api-figcheck').checked })); } catch (e) { } $('#dlg-api').close(); scanStatus(key ? 'API 키 저장됨' : ''); };
 $('#api-clear').onclick = () => { try { localStorage.removeItem(API_LS); } catch (e) { } $('#api-key').value = ''; scanStatus('API 키를 지웠습니다'); };
-if (SCAN_MODE) {
-  document.body.classList.add('scanmode');
-  document.title = '스캔 변환';
-  const h1 = document.querySelector('header.top h1'); if (h1) h1.textContent = '스캔 변환';
-  for (const id of ['t-design', 't-book', 'b-find', 'b-scan', 'b-report', 'b-scanask', 'b-scanload', 'f-hwpx', 'f-key', 's-wb']) { const e = $('#' + id); const box = e && (e.closest('span.conv-only') || e.closest('nav') || e); if (box) box.classList.add('scan-hide'); }
-  if (!apiConf().key) setTimeout(() => scanStatus('처음이면 "API 설정"에서 API 키를 넣어 주세요'), 0);
-  /* 단계 단추: 스캔 화면에서는 '쪽 보기' / '검수(원본과 나란히)' */
-  $('#st-1').textContent = '쪽 보기'; $('#st-2').textContent = '검수 (원본과 나란히)';
-  $('#steps').classList.remove('conv-only');
+/* 스캔 변환 탭: 같은 변환기에서 스캔에 필요 없는 단추를 숨기고 '변환 시작'·'API 설정'을 보여 줌 */
+for (const id of ['b-find', 'b-scan', 'b-report', 'b-scanask', 'b-scanload', 'f-hwpx', 'f-key', 's-wb']) { const e = $('#' + id); const box = e && (e.closest('span.conv-only') || e); if (box) box.classList.add('scan-hide'); }
+function setScanMode(on) {
+  document.body.classList.toggle('scanmode', on);
+  document.title = on ? '스캔 변환' : '내신교재 문제 변환기';
+  $('#st-1').textContent = on ? '쪽 보기' : '1단계 문제 고르기'; $('#st-2').textContent = on ? '검수 (원본과 나란히)' : '2단계 검수';
+  if (on && !apiConf().key) setTimeout(() => scanStatus('처음이면 "API 설정"에서 API 키를 넣어 주세요'), 0);
 }
+/* 예전 스캔 주소(?mode=scan, scan.html)로 들어오면 스캔 변환 탭으로 시작 */
+if (new URLSearchParams(location.search).get('mode') === 'scan') setView('scan');
 window.__app = { guessAnsType, textBlocks, renderPreview, coverKit, dzLayout, dzRender, readAnswerKey, linkAnswerKey, state, toHwp, extractText, detect, readPage, hwpxBuild, splitMath, tidyMath, saveToBank, bank, bk, readBank, bkNumbered, bookHwpx, answerHwpx, bookPages, bkRender, setBankRecs: r => { bkRecs = r; } };
 </script>
 </body>
