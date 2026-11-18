@@ -4456,7 +4456,26 @@ $('#b-find').onclick = async () => {
 };
 
 /* ── 목록 ── */
+/* AI가 그린 그림 크기: 하나 25~40mm, 한 문제 합 80mm 이하(한 줄에 나란히). 비율은 그대로. 고쳤으면 true */
+const FIG_MIN_MM = 25, FIG_MAX_MM = 40, FIG_SUM_MM = 80;
+function fitFigs(it) {
+  const fs = (it.figs || []).filter(f => f.redrawn && f.w > 0); if (!fs.length) return false;
+  let changed = false;
+  const scale = (f, k) => { if (Math.abs(k - 1) < 0.01) return; f.w *= k; f.h = (f.h || 0) * k; changed = true; };
+  for (const f of fs) { const mm = f.w * PT_MM; if (mm > FIG_MAX_MM) scale(f, FIG_MAX_MM / mm); else if (mm < FIG_MIN_MM) scale(f, FIG_MIN_MM / mm); }
+  const sum = fs.reduce((a, f) => a + f.w * PT_MM, 0);
+  if (sum > FIG_SUM_MM) for (const f of fs) scale(f, FIG_SUM_MM / sum);
+  return changed;
+}
+/* 그림을 다시 그리면 처음 변환 때의 그림 메모(곡선·점선 등)는 지우고 글 메모만 남김 */
+const FIG_NOTE_RE = /그림|곡선|점선|실선|직선|도형|작도|눈금|화살표|원호|각도 표시|길이 표시/;
+function dropFigNotes(it) {
+  if (!it.aiNote) return;
+  const keep = String(it.aiNote).split(/\s*\/\s*|(?<=[.。])\s+/).filter(x => x.trim() && !FIG_NOTE_RE.test(x));
+  if (keep.length) it.aiNote = keep.join(' / '); else delete it.aiNote;
+}
 function renderList() {
+  { let ch = false; for (const it of state.items) if (fitFigs(it)) ch = true; if (ch) saveSoon(); }
   const L = $('#list');
   if (!state.items.length) { L.innerHTML = '<p class="empty">찾은 문제가 없습니다. 쪽 위에서 "+ 상자 그리기"로 직접 만들 수 있습니다.</p>'; return; }
   const done = state.items.filter(x => x.done).length;
@@ -7089,6 +7108,7 @@ const SVG_HOW = `SVG로 지키는 방법:
 - **길이 표시(두 점 사이 길이를 나타내는 곡선)는 반드시 곡선으로 그린다. 직선으로 그리지 않는다.** 두 끝점을 잇는, 도형 바깥쪽으로 볼록한 활 모양: <path d="M x1 y1 Q cx cy x2 y2" fill="none" stroke-dasharray="4 3"/>. 조절점(cx, cy)은 두 끝점의 가운데에서 선분에 수직으로 도형 바깥쪽으로 선분 길이의 약 15~25%만큼 떨어진 곳. 원본이 점선이면 stroke-dasharray, 실선이면 빼고 그린다. 길이 숫자는 곡선의 가장 볼록한 곳 바로 바깥에 놓는다.
 - 길이 숫자가 놓일 자리에서는 점선 곡선 경로 자체를 두 조각(각각 Q 곡선)으로 끊는다(흰 사각형으로 덮지 않는다).
 - 글자는 선·원호와 겹치지 않는 자리에, 각도 호는 반지름 작게.
+- 그림 크기("너비"): 그림 하나 25~40mm, 한 문제의 그림을 모두 더해도 80mm 이하.
 - 한 문제에 그림이 여러 개(예: 그림 (가)·(나), 두 그래프)면 그림마다 SVG를 하나씩 따로 그려, 그 문제의 "그림" 배열에 원본 순서(왼쪽→오른쪽, 위→아래)대로 모두 넣는다. 여러 그림을 하나의 SVG에 합치지 않고, 한 그림을 여러 조각으로 나누지도 않는다. 그림 아래의 (가)·(나) 같은 이름표는 그 그림 SVG 안에 넣는다.`;
 const withRules = p => `${p}\n\n${SVG_HOW}\n\n[선생님 그림 규칙 — 반드시 따름]\n${figRules()}`;
 const apiConf = () => { try { return JSON.parse(localStorage.getItem(API_LS)) || {}; } catch (e) { return {}; } };
@@ -7101,7 +7121,7 @@ const SCAN_PROMPT = `너는 한국 수학 학원 선생님을 돕는다. 이 이
 - 소문항은 줄을 바꾸고 ⑴ ⑵ ⑶. 객관식 선택지는 줄을 바꾸고 ① ② ③ ④ ⑤. 보기 상자는 [보기] 줄, 내용 줄들, [/보기] 줄. 빈칸은 ＿＿＿＿.
 - 문항 번호(예: "문제 3.", "3")는 문제 글에 넣지 않고 "번호"에만.
 - 그림: 문제에 그림·도형·그래프·표가 있으면 깨끗한 선 그림 SVG로 **새로 그린다**. viewBox를 쓰고, 검은 선(stroke-width 1.5), 숨은 선은 점선, 색칠은 #dedede, 글자는 serif. 꼭짓점 이름·길이·각도 등 그림에 있는 정보는 모두 넣는다. 모눈 위 도형은 칸 수를 정확히 세어 같은 칸 좌표로 그린다(닮음·넓이가 맞아야 함). 사진·삽화는 단순한 선 그림으로. 손글씨는 그리지 않는다. 그림이 없으면 "그림": [].
-- 그림 크기는 인쇄했을 때의 크기(mm, 보통 너비 30~80).
+- 그림 크기는 인쇄했을 때의 크기(mm): 그림 하나의 너비 25~40mm, 한 문제의 그림 너비를 모두 더해도 80mm 이하(한 줄에 나란히 놓임).
 - 앞 쪽에서 이어지는 문제의 뒷부분만 있으면 그 문제는 빼고 "확인"에 적지 않는다.`;
 /* SVG → PNG(흰 바탕, 선명하게 3배). 스크립트·이벤트·바깥 링크는 지움 */
 async function svgToPng(svg, mmW) {
@@ -7210,6 +7230,7 @@ async function scanConvert(from = 1, to = pdf ? pdf.numPages : 0) {
         else { it.aiNote = (it.aiNote ? it.aiNote + ' / ' : '') + '그림을 그리지 못함'; }
       }
       if (it.figs.length && conf.figCheck !== false) { scanStatus(`${n}쪽 ${it.num}번 그림 검수 중…`); const w = box.x1 - box.x0, h = box.y1 - box.y0; await reviewFigs(it, await toJpegB64(await cropPng(P, box, Math.max(2, Math.min(6, 1800 / Math.max(w, h))))), conf); }
+      fitFigs(it);
       it.file = fileName(it);
       if (state.items.some(x => x.file === it.file)) it.file += '_' + (state.items.length + 1);
       state.items.push(it); made++;
@@ -7231,7 +7252,7 @@ const FIG_PROMPT = `이 이미지는 스캔한 수학 문제 하나다. 문제 �
 - 입체도형은 보이는 모서리는 실선, 보이지 않는 모서리는 점선.
 - 검은 선(stroke-width 1.5), 색칠 #dedede, 글자 serif. 학생 손글씨·풀이·동그라미는 그리지 않는다.
 - 한 문제에 그림이 여러 개면 그림마다 따로 그려 배열에 원본 순서대로 모두 넣는다(합치지도, 한 그림을 쪼개지도 않음).
-- 너비·높이는 인쇄 크기(mm).`;
+- 너비·높이는 인쇄 크기(mm): 그림 하나의 너비 25~40mm, 한 문제의 그림 너비를 모두 더해도 80mm 이하(한 줄에 나란히 놓임).`;
 async function toJpegB64(dataUrl, maxSide = 1800) {
   const im = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = dataUrl; });
   const k = Math.min(1, maxSide / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement('canvas');
@@ -7281,6 +7302,7 @@ $('#e-figs').addEventListener('click', async e => {
     for (const g of gs) { const mmW = Math.max(15, Math.min(150, +g.너비 || 50)), r2 = await svgToPng(g.svg, mmW); if (r2) figs.push({ png: r2.png, w: mmW / PT_MM, h: (+g.높이 || mmW * r2.ratio) / PT_MM, place: '아래', redrawn: true, svg: String(g.svg) }); }
     if (!figs.length) throw new Error('새 그림을 받지 못했습니다' + (r.stop === 'max_tokens' ? '(너무 길어 잘림)' : ''));
     it.figsPrev = it.figs; it.figs = figs.concat(it.figs.filter(f => !f.redrawn)); it.edited = true;
+    fitFigs(it); dropFigNotes(it); delete it.figNote;
     if (conf.figCheck !== false) { msg.textContent = '원본과 비교해 검수하는 중…'; await reviewFigs(it, await toJpegB64(src), conf); }
     save(); renderEditor(); scanStatus('그림을 다시 그렸습니다');
   } catch (err) { msg.textContent = ''; btn.disabled = false; alert('그림을 다시 그리지 못했습니다: ' + err.message); }
