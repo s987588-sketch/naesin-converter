@@ -5794,6 +5794,14 @@ function dzHeader(h, ...binIds) {
     .replace('</hh:borderFill>', `<hc:fillBrush><hc:imgBrush mode="TOTAL"><hc:img binaryItemIDRef="${binId}" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/></hc:imgBrush></hc:fillBrush></hh:borderFill>`)).join('');
   return h.replace(/<hh:borderFills itemCnt="\d+">/, `<hh:borderFills itemCnt="${n + binIds.length}">`).replace('</hh:borderFills>', bfs + '</hh:borderFills>');
 }
+/* 한 문제의 그림 여러 개는 한 줄에 나란히(가운데). 사진 문제(쪽·문제 사진)는 혼자 한 줄 */
+function figRows(figs) {
+  const rows = []; let cur = [];
+  for (const f of figs || []) { if (f.photo) { if (cur.length) rows.push(cur); rows.push([f]); cur = []; } else cur.push(f); }
+  if (cur.length) rows.push(cur);
+  /* 나란히 놓은 그림이 칸(약 72mm, 그림 사이 빈칸 포함)보다 넓으면 같은 비율로 줄여 한 줄에 */
+  return rows.map(r => { const sum = r.reduce((a, f) => a + (f.photo ? 0 : f.w), 0), k = r.length > 1 && sum > 205 ? 205 / sum : 1; return k < 1 ? r.map(f => ({ ...f, w: f.w * k, h: f.h * k })) : r; });
+}
 function hwpxBuild(list, opt) {
   const { P, R, T, PIC, FRAME, line, HEAD, pack } = hwpxWriter();
   let body = P(PARA.left, HEAD + R(CHAR.body, '<hp:t/>'));
@@ -5803,7 +5811,7 @@ function hwpxBuild(list, opt) {
     n++;
     if (opt.src) body += P(PARA.right, R(CHAR.src, T(it.src ?? sourceText(it))));
     textBlocks(it.text).forEach((b, i) => { body += b.box ? P(PARA.left, R(CHAR.body, FRAME(b.box, b.lines.map(l => P(/^\{가운데\}/.test(l) ? PARA.center : PARA.left, line(l))).join(''), COL_W - 600) + '<hp:t/>')) : P(/^\{가운데\}/.test(b.s) ? PARA.center : PARA.left, line(b.s, i === 0 ? n + '. ' : '')); });
-    for (const f of it.figs) body += P(PARA.center, R(CHAR.body, PIC(f) + '<hp:t/>'));
+    for (const g of figRows(it.figs)) body += P(PARA.center, R(CHAR.body, g.map(f => PIC(f)).join('<hp:t>    </hp:t>') + '<hp:t/>'));
     if (opt.ans && it.answer) body += P(PARA.left, R(CHAR.bold, T('정답 ')) + line(it.answer));
     body += P(PARA.left, R(CHAR.body, '<hp:t/>')) + P(PARA.left, R(CHAR.body, '<hp:t/>'));
     prv.push(n + '. ' + String(it.text || '').replace(/\$/g, ''));
@@ -6953,7 +6961,7 @@ function bookHwpx(items, opt) {
     if (newMid) inner += P(PARA.left, R(CHAR.bold, T('■ ' + it.mid)));
     if (opt.src) inner += P(PARA.right, R(CHAR.src, T(it.src)));
     textBlocks(it.text).forEach((b, i) => { inner += b.box ? P(PARA.left, R(CHAR.body, W.FRAME(b.box, b.lines.map(l => P(/^\{가운데\}/.test(l) ? PARA.center : PARA.left, line(l))).join(''), (opt.endnote ? colW - 800 : colW) - 600) + '<hp:t/>')) : P(/^\{가운데\}/.test(b.s) ? PARA.center : PARA.left, line(b.s, i === 0 ? it.n + '. ' : '')); });
-    for (const f of it.figs) inner += P(PARA.center, R(CHAR.body, PIC(f.photo ? { ...f, maxH: (it.two ? slot * 2 + 500 : slot) - 3000 } : f) + '<hp:t/>'));
+    for (const g of figRows(it.figs)) inner += P(PARA.center, R(CHAR.body, g.map(f => PIC(f.photo ? { ...f, maxH: (it.two ? slot * 2 + 500 : slot) - 3000 } : f)).join('<hp:t>    </hp:t>') + '<hp:t/>'));
     if (opt.teacher && it.answer) inner += P(PARA.left, R(CHAR.bold, T('정답 ')) + line(it.answer));
     /* 해설을 미주로: 칸(표) 바로 뒤에 미주 표시를 두고(칸 폭을 조금 줄여 같은 줄에), 내용은 [중단원 번호] 정답 + 해설 */
     const note = opt.endnote ? R(CHAR.body, W.NOTE(k => P(PARA.left, R(CHAR.body, W.NOTENUM(k)) + line(`[${it.mid} ${it.n}번] 정답 ${it.answer || '-'}`))
@@ -7047,7 +7055,7 @@ async function bookPrint(items, dz) {
       ${idx === 0 && it.first ? `<div class="mid">■ ${esc(it.mid)}</div>` : ''}
       ${bk.src ? `<div class="src">${esc(it.src)}</div>` : ''}
       <div class="q">${textBlocks(it.text).map((b, i) => b.box ? qboxHtml(b) : (i === 0 ? `<b>${it.n}.</b> ` : '') + mathLine(b.s) + '<br>').join('')}</div>
-      ${it.figs.map(f => `<div class="fig"><img src="${f.png}" style="${f.photo ? `max-width:100%;max-height:calc(var(--slot) * ${span} + ${span - 1} * 4mm - 14mm)` : `width:${Math.min(f.w, 220)}pt`}" alt=""></div>`).join('')}
+      ${figRows(it.figs).map(g => `<div class="fig">${g.map(f => `<img src="${f.png}" style="${f.photo ? `max-width:100%;max-height:calc(var(--slot) * ${span} + ${span - 1} * 4mm - 14mm)` : `width:${Math.min(f.w, 220)}pt;max-width:${(100 / g.length).toFixed(1)}%`};vertical-align:bottom;margin:0 2mm" alt="">`).join('')}</div>`).join('')}
       ${bk.teacher && it.answer ? `<div class="ans"><b>정답</b> ${renderPreview(it.answer)}</div>` : ''}
     </div>`;
   let lastMid = null;
