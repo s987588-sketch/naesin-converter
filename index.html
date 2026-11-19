@@ -106,7 +106,7 @@ body.scanmode .scan-hide { display: none !important; }
 .syms button { min-width: 34px; padding: 3px 6px; min-height: 30px; }
 #body { width: 100%; min-height: 150px; resize: vertical; font-family: Consolas, "Malgun Gothic", monospace; line-height: 1.6; }
 .qbox { border: 1px solid #8a8f98; border-radius: 6px; padding: 4px 10px 6px; margin: 4px 0; white-space: normal; line-height: 1.9; }
-.lay-c { display: block; text-align: center; } .lay-i { display: inline-block; padding-left: 2em; } .lay-t { display: inline-block; width: 3em; }
+.lay-c { display: block; text-align: center; } .lay-i { display: inline-block; padding-left: 2em; } .lay-t { display: inline-block; width: 3em; } .lay-row { display: inline-flex; flex-wrap: wrap; align-items: baseline; width: 100%; vertical-align: top; white-space: normal; } .lay-col { box-sizing: border-box; padding-right: 1em; }
 .qbox-t { display: block; font-size: 12px; font-weight: 700; color: #444; }
 
 /* 버튼 수식기(앱 앱/public/math-editor.js·teacher.css와 같은 모양) */
@@ -4142,7 +4142,9 @@ const mathSeg = s => splitMath(s).map(p => p.m != null ? katex.renderToString(to
 /* 한 줄: 줄 배치 표시 {가운데}·{들여}(줄 맨 앞), {탭}(줄 가운데) */
 const LAY_RE = /^\{(가운데|들여)\}/;
 function mathLine(s) {
-  const m = LAY_RE.exec(s), h = (m ? s.slice(m[0].length) : s).split('{탭}').map(mathSeg).join('<span class="lay-t"></span>');
+  /* {탭}: 교과서처럼 칸을 나눠 줄 맞춤(⑴ ⑵ 두 개면 반씩, 네 개면 4분의 1씩). 칸보다 긴 식은 칸을 넓혀 다음 줄로 */
+  const m = LAY_RE.exec(s), body = m ? s.slice(m[0].length) : s, parts = body.split('{탭}');
+  const h = parts.length < 2 ? mathSeg(body) : `<span class="lay-row">${parts.map(p => `<span class="lay-col" style="min-width:${(100 / parts.length).toFixed(2)}%">${mathSeg(p)}</span>`).join('')}</span>`;
   return m ? `<span class="${m[1] === '가운데' ? 'lay-c' : 'lay-i'}">${h}</span>` : h;
 }
 const qboxHtml = b => `<div class="qbox">${b.box === '보기' ? '<span class="qbox-t">보기</span>' : ''}${b.lines.map(mathLine).join('<br>')}</div>`;
@@ -5087,7 +5089,8 @@ function hwpEq(src) {
     if (c === '"') { const e = s.indexOf('"', i + 1), t = s.slice(i + 1, e < 0 ? s.length : e); push('str', t); i = e < 0 ? s.length : e + 1; continue; }
     let m;
     if ((m = /^[A-Za-z]+/.exec(s.slice(i)))) {
-      const w = m[0]; i += w.length;
+      let w = m[0]; i += w.length;
+      if (HWEQ_KW[w] == null && /^[A-Z]+$/.test(w) && /^(left|right|sqrt|over|atop|root|of|bar|vec|hat|cases|pile|lpile|rpile|matrix|pmatrix|bmatrix|dmatrix)$/.test(w.toLowerCase())) w = w.toLowerCase();   // 한글 수식은 LEFT·RIGHT·SQRT·OVER 처럼 대문자도 같은 명령
       if (w === 'left' || w === 'right') {   // 바로 다음 한 글자가 괄호 종류
         while (/\s/.test(s[i] || '')) i++;
         const d = s[i] || '.'; i++; push('kw', w, { d }); continue;
@@ -5118,13 +5121,16 @@ function hwpEq(src) {
       while (p < a.length && !a[p].sp && !/^(lb|rb|sup|sub)$/.test(a[p].k)) out.push(a[p++]);
       return out;
     };
-    const operand = () => {   // sqrt·rm·bold 등의 대상: 묶음 또는 붙은 덩어리 (위·아래첨자까지 포함)
-      if (p >= a.length) return '';
-      let b;
-      if (a[p].k === 'lb') b = tex(group());
-      else { const t = [a[p++]]; while (p < a.length && !a[p].sp && !/^(lb|rb|sup|sub|op|kw)$/.test(a[p].k)) t.push(a[p++]); b = tex(t); }
-      return b;
+    /* sqrt·rm·bold·분모 등의 대상: 묶음 또는 붙은 덩어리. 대상이 다시 sqrt·bar 같은 명령이면 그 명령의 대상까지 함께(분모 sqrt 2, sqrt {-3}) */
+    const PREFIX = /^(sqrt|rm|it|bold|bar|overline|underline|vec|hat)$/;
+    const operandToks = () => {
+      if (p >= a.length || /^(sup|sub|rb|op|nl|amp)$/.test(a[p].k)) return [];   // 대상이 없음(rm A it _{4} 의 it 등)
+      if (a[p].k === 'lb') return group();
+      if (a[p].k === 'kw' && PREFIX.test(a[p].v)) { const kw = a[p++]; const inner = operandToks(); return [kw, { k: 'lb', v: '{' }, ...inner, { k: 'rb', v: '}' }]; }
+      if (a[p].k === 'kw' && a[p].v === 'root') { const kw = a[p++]; const n = operandToks(); if (p < a.length && a[p].k === 'kw' && a[p].v === 'of') p++; const b = operandToks(); return [kw, { k: 'lb', v: '{' }, ...n, { k: 'rb', v: '}' }, { k: 'lb', v: '{' }, ...b, { k: 'rb', v: '}' }]; }
+      const t = [a[p++]]; while (p < a.length && !a[p].sp && !/^(lb|rb|sup|sub|op|kw)$/.test(a[p].k)) t.push(a[p++]); return t;
     };
+    const operand = () => tex(operandToks());
     const scriptArg = () => { if (p >= a.length) return ''; if (a[p].k === 'lb') return tex(group()); const r = []; r.push(a[p++]); while (p < a.length && !a[p].sp && !/^(lb|rb|sup|sub)$/.test(a[p].k)) r.push(a[p++]); return tex(r); };
     while (p < a.length) {
       const t = a[p++]; let x = null, isOp = false;
@@ -5146,10 +5152,8 @@ function hwpEq(src) {
         case 'kw':
           switch (t.v) {
             case 'sqrt': x = '\\sqrt{' + operand() + '}'; break;
-            case 'root': x = '\\sqrt[' + operand() + ']{' + operand() + '}'; break;
-            case 'rm': x = '\\mathrm{' + operand() + '}'; break;
-            case 'it': x = '\\mathit{' + operand() + '}'; break;
-            case 'bold': x = '\\mathbf{' + operand() + '}'; break;
+            case 'root': { const n = operand(); if (p < a.length && a[p].k === 'kw' && a[p].v === 'of') p++; x = '\\sqrt[' + n + ']{' + operand() + '}'; break; }
+            case 'rm': case 'it': case 'bold': { const o = operand(); x = o ? '\\' + { rm: 'mathrm', it: 'mathit', bold: 'mathbf' }[t.v] + '{' + o + '}' : ''; break; }
             case 'bar': case 'overline': x = '\\overline{' + operand() + '}'; break;
             case 'underline': x = '\\underline{' + operand() + '}'; break;
             case 'vec': x = '\\vec{' + operand() + '}'; break;
@@ -5188,12 +5192,12 @@ const HP_NS = 'http://www.hancom.co.kr/hwpml/2011/paragraph', HC_NS = 'http://ww
 const hxKids = (e, name) => [...e.children].filter(c => c.localName === name);
 const hxFirst = (e, name) => hxKids(e, name)[0] || null;
 const HX_PAGE_H = 68315;   // 교과서 한 쪽을 채우는 표 높이(HWPUNIT). 이만큼 차면 다음 쪽
-/* hp:t 안의 글(빈칸·탭 조각 포함) */
+/* hp:t 안의 글(빈칸·탭 조각 포함). 탭은 \u0005(→ {탭}), 강제 줄 바꿈은 \n 으로 남김(⑴ ⑵ 사이 간격·줄이 교과서처럼) */
 function hxText(t) {
   let o = '';
   for (const n of t.childNodes) {
     if (n.nodeType === 3) o += n.data;
-    else if (n.nodeType === 1) { const k = n.localName; if (k === 'nbSpace' || k === 'fwSpace' || k === 'tab') o += ' '; else if (k === 'lineBreak') o += ' '; }
+    else if (n.nodeType === 1) { const k = n.localName; if (k === 'nbSpace' || k === 'fwSpace') o += ' '; else if (k === 'tab') o += '\u0005'; else if (k === 'lineBreak') o += '\n'; }
   }
   return o;
 }
@@ -5249,7 +5253,8 @@ function hxLine(items) {
     if (q.t != null) { if (q.t === '' && eq != null) continue; flush(); o += q.t; }
   }
   flush();
-  return o.replace(/[\u{F0000}-\u{FFFFD}-]/gu, m => (m === '\u{F00BC}' ? '\u0001' : '')).replace(/[ \t　 ]+/g, ' ').replace(/([^\s(])([⑴-⒇])/g, '$1 $2').trim();
+  return o.replace(/[\u{F0000}-\u{FFFFD}-]/gu, m => (m === '\u{F00BC}' ? '\u0001' : '')).replace(/[ \t　 ]+/g, ' ').replace(/([^\s(\u0005])([⑴-⒇])/g, '$1 $2').replace(/ *\n */g, '\n')
+    .replace(/[ \u0005]*\u0005[ \u0005]*/g, '{탭}').replace(/^(\s|\{탭\})+|(\s|\{탭\})+$/g, '').replace(/\{탭\}\n|\n\{탭\}/g, '\n');
 }
 const hxBlank = e => !e.items.some(q => (q.t || '').replace(/[\s　 ]/g, '') || q.eq || q.pic);
 /* 읽은 문단들 → 문제 목록 */
