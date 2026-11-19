@@ -5124,25 +5124,36 @@ function hwpEq(src) {
     /* sqrt·rm·bold·분모 등의 대상: 묶음 또는 붙은 덩어리. 대상이 다시 sqrt·bar 같은 명령이면 그 명령의 대상까지 함께(분모 sqrt 2, sqrt {-3}) */
     const PREFIX = /^(sqrt|rm|it|bold|bar|overline|underline|vec|hat)$/;
     const operandToks = () => {
-      if (p >= a.length || /^(sup|sub|rb|op|nl|amp)$/.test(a[p].k)) return [];   // 대상이 없음(rm A it _{4} 의 it 등)
+      if (p >= a.length || /^(sup|sub|rb|nl|amp)$/.test(a[p].k)) return [];   // 대상이 없음(rm A it _{4} 의 it 등)
       if (a[p].k === 'lb') return group();
       if (a[p].k === 'kw' && PREFIX.test(a[p].v)) { const kw = a[p++]; const inner = operandToks(); return [kw, { k: 'lb', v: '{' }, ...inner, { k: 'rb', v: '}' }]; }
       if (a[p].k === 'kw' && a[p].v === 'root') { const kw = a[p++]; const n = operandToks(); if (p < a.length && a[p].k === 'kw' && a[p].v === 'of') p++; const b = operandToks(); return [kw, { k: 'lb', v: '{' }, ...n, { k: 'rb', v: '}' }, { k: 'lb', v: '{' }, ...b, { k: 'rb', v: '}' }]; }
-      const t = [a[p++]]; while (p < a.length && !a[p].sp && !/^(lb|rb|sup|sub|op|kw)$/.test(a[p].k)) t.push(a[p++]); return t;
+      const t = [a[p++]]; while (p < a.length && !a[p].sp && !/^(lb|rb|sup|sub|kw|nl|amp)$/.test(a[p].k)) t.push(a[p++]); return t;   // 한글 수식: sqrt -3 → √(-3) (빈칸까지)
     };
     const operand = () => tex(operandToks());
+    /* 분모(한글 수식 규칙): 묶음 {…} 하나, 또는 빈칸·묶음이 나올 때까지 붙어 있는 덩어리(1+i, Z_1, 2(x+1) 등. 첨자는 대상까지) */
+    const denToks = () => {
+      if (p >= a.length) return [];
+      if (a[p].k === 'kw' && (PREFIX.test(a[p].v) || a[p].v === 'root')) return operandToks();
+      if (a[p].k === 'lb') return group();
+      const st = p;
+      const arg = () => { if (p >= a.length) return; if (a[p].k === 'lb') { let d = 0; for (; p < a.length; p++) { if (a[p].k === 'lb') d++; else if (a[p].k === 'rb' && --d === 0) { p++; return; } } } else p++; };
+      p++;
+      while (p < a.length && !a[p].sp && !/^(lb|rb|nl|amp)$/.test(a[p].k) && !(a[p].k === 'kw' && /^(over|atop)$/.test(a[p].v))) { const k = a[p++].k; if (k === 'sup' || k === 'sub') arg(); }
+      return a.slice(st, p);
+    };
     const scriptArg = () => { if (p >= a.length) return ''; if (a[p].k === 'lb') return tex(group()); const r = []; r.push(a[p++]); while (p < a.length && !a[p].sp && !/^(lb|rb|sup|sub)$/.test(a[p].k)) r.push(a[p++]); return tex(r); };
     while (p < a.length) {
-      const t = a[p++]; let x = null, isOp = false;
+      const t = a[p++]; let x = null, isOp = false, brk = false, grp = false;
       switch (t.k) {
         case 'rb': continue;
-        case 'lb': { p--; x = '{' + tex(group()) + '}'; break; }   // 묶음은 그대로 둠(분자일 때는 아래에서 바깥 중괄호를 벗김)
+        case 'lb': { p--; x = '{' + tex(group()) + '}'; grp = true; break; }   // 묶음은 그대로 둠(분자일 때는 아래에서 바깥 중괄호를 벗김)
         case 'num': x = t.v; break;
         case 'id': x = t.v; break;
         case 'str': x = '\\text{' + t.v + '}'; break;
         case 'sym': x = HWEQ_KW[t.v]; isOp = /[×÷±∓≤≥≠∈∉⊂⊃∪∩∼≈∴∵·]/.test(x); break;
-        case 'nl': x = ' \\\\ '; isOp = true; break;
-        case 'amp': x = ' & '; isOp = true; break;
+        case 'nl': x = ' \\\\ '; isOp = true; brk = true; break;
+        case 'amp': x = ' & '; isOp = true; brk = true; break;
         case 'op': x = t.v; isOp = /^[+\-=<>,;:|×÷±∼→←⇒≪≫≤≥≠]$/.test(t.v) || !!HWEQ_OPS2[t.v]; break;
         case 'sup': case 'sub': {
           const prev = items.pop(); const base = prev ? prev.tex : '{}';
@@ -5165,11 +5176,12 @@ function hwpEq(src) {
               x = '\\begin{' + env + '}' + (p < a.length && a[p].k === 'lb' ? tex(group()) : '') + '\\end{' + env + '}'; break;
             }
             case 'over': case 'atop': {
-              /* 분자: 앞에서 연산자 또는 공백으로 시작하는 덩어리까지, 분모: 뒤의 묶음 또는 붙은 덩어리 */
+              /* 분자·분모(한글 수식 규칙): 빈칸으로 나뉜 덩어리 전체. 1-i over 1+i → (1-i)/(1+i), 4+4i over 1+1 → (4+4i)/(1+1) */
               let k = items.length; const num = [];
-              while (k > 0) { const it = items[k - 1]; if (it.op) break; k--; num.unshift(it); if (it.sp) break; }
+              if (k > 0 && items[k - 1].grp) num.unshift(items[--k]);   // 앞이 묶음 {…}이면 그 묶음만
+              else while (k > 0) { const it = items[k - 1]; if (it.brk || it.grp) break; k--; num.unshift(it); if (it.sp) break; }
               items.length = k;
-              const den = operand();
+              const den = tex(denToks());
               let nt = num.map(q => q.tex).join('') || '{}';
               if (num.length === 1 && /^\{[\s\S]*\}$/.test(nt) && tex0(nt)) nt = nt.slice(1, -1);   // 묶음 하나뿐이면 바깥 중괄호를 벗김
               x = t.v === 'over' ? '\\frac{' + nt + '}{' + den + '}' : '{' + nt + '\\atop ' + den + '}';
@@ -5180,7 +5192,7 @@ function hwpEq(src) {
           break;
         default: x = '';
       }
-      items.push({ tex: x, op: isOp, sp: t.sp });
+      items.push({ tex: x, op: isOp, sp: t.sp, brk, grp });
     }
     return items;
   }
@@ -5192,12 +5204,12 @@ const HP_NS = 'http://www.hancom.co.kr/hwpml/2011/paragraph', HC_NS = 'http://ww
 const hxKids = (e, name) => [...e.children].filter(c => c.localName === name);
 const hxFirst = (e, name) => hxKids(e, name)[0] || null;
 const HX_PAGE_H = 68315;   // 교과서 한 쪽을 채우는 표 높이(HWPUNIT). 이만큼 차면 다음 쪽
-/* hp:t 안의 글(빈칸·탭 조각 포함). 탭은 \u0005(→ {탭}), 강제 줄 바꿈은 \n 으로 남김(⑴ ⑵ 사이 간격·줄이 교과서처럼) */
+/* hp:t 안의 글(빈칸·탭 조각 포함). 탭은 \u0005(→ {탭}), 강제 줄 바꿈은 \u0007 → ⑴·①·ㄱ·(가)·[보기] 앞이면 줄 바꿈, 아니면 빈칸(교과서 쪽 너비에 맞춘 줄 바꿈은 버림) */
 function hxText(t) {
   let o = '';
   for (const n of t.childNodes) {
     if (n.nodeType === 3) o += n.data;
-    else if (n.nodeType === 1) { const k = n.localName; if (k === 'nbSpace' || k === 'fwSpace') o += ' '; else if (k === 'tab') o += '\u0005'; else if (k === 'lineBreak') o += '\n'; }
+    else if (n.nodeType === 1) { const k = n.localName; if (k === 'nbSpace' || k === 'fwSpace') o += ' '; else if (k === 'tab') o += '\u0005'; else if (k === 'lineBreak') o += '\u0007'; }
   }
   return o;
 }
@@ -5219,7 +5231,7 @@ function hxParas(sec) {
   }
   function walkP(p, cells, pg) {
     const { items, tbls, boxes } = parts(p);
-    out.push({ cells, page: pg, items, tbl: tbls.length > 0 || boxes.length > 0 });
+    out.push({ cells, page: pg, items, tbl: tbls.length > 0 || boxes.length > 0, pp: p.getAttribute('paraPrIDRef') });
     for (const sl of boxes) { const id = ++cellSeq.n; for (const q of hxKids(sl, 'p')) walkP(q, cells.concat(id), pg); }
     for (const tbl of tbls) for (const tr of hxKids(tbl, 'tr')) for (const tc of hxKids(tr, 'tc')) {
       const id = ++cellSeq.n, sl = hxFirst(tc, 'subList');
@@ -5253,8 +5265,16 @@ function hxLine(items) {
     if (q.t != null) { if (q.t === '' && eq != null) continue; flush(); o += q.t; }
   }
   flush();
-  return o.replace(/[\u{F0000}-\u{FFFFD}-]/gu, m => (m === '\u{F00BC}' ? '\u0001' : '')).replace(/[ \t　 ]+/g, ' ').replace(/([^\s(\u0005])([⑴-⒇])/g, '$1 $2').replace(/ *\n */g, '\n')
+  return o.replace(/[\u{F0000}-\u{FFFFD}-]/gu, m => (m === '\u{F00BC}' ? '\u0001' : '')).replace(/[ \t　 ]+/g, ' ').replace(/([^\s(\u0005])([⑴-⒇])/g, '$1 $2').replace(/ *\u0007 *(?=[⑴-⒇①-⑳ㄱ-ㅎ]|\(\S\)|\[)/g, '\n').replace(/ *\u0007 */g, ' ').replace(/ *\n */g, '\n')
     .replace(/[ \u0005]*\u0005[ \u0005]*/g, '{탭}').replace(/^(\s|\{탭\})+|(\s|\{탭\})+$/g, '').replace(/\{탭\}\n|\n\{탭\}/g, '\n');
+}
+let hxCenter = new Set();
+/* 문단 한 줄 + 줄 배치: 식만 있는 줄이 가운데 맞춘 문단이면 {가운데}, 탭으로 들여 썼으면 {들여} */
+function hxLineLay(e) {
+  const l = hxLine(e.items); if (!l || l.includes('\n') || !/^\$[^$]+\$$/.test(l.trim())) return l;
+  if (e.pp != null && hxCenter.has(e.pp)) return '{가운데}' + l;
+  const first = e.items.find(q => q.eq != null || (q.t || '').trim()); if (first && first.t != null && /^[\s]*\u0005/.test(first.t)) return '{들여}' + l;   // 탭으로 들여 쓴 식만 있는 줄
+  return l;
 }
 const hxBlank = e => !e.items.some(q => (q.t || '').replace(/[\s　 ]/g, '') || q.eq || q.pic);
 /* 읽은 문단들 → 문제 목록 */
@@ -5345,6 +5365,9 @@ async function hxBuild(f) {
   const names = Object.keys(zip.files).filter(n => /^Contents\/section\d+\.xml$/i.test(n)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]);
   if (!names.length) throw new Error('HWPX 안에서 본문(section)을 찾지 못했습니다');
   const probs = [], floats = []; let page0 = null;
+  /* 가운데 맞춘 문단 모양(paraPr) 번호: 식만 있는 가운데 줄은 {가운데}로 */
+  hxCenter = new Set();
+  { const h = zip.file('Contents/header.xml'); if (h) for (const m of (await h.async('string')).matchAll(/<hh:paraPr\b[^>]*\bid="(\d+)"[^>]*>[\s\S]*?<\/hh:paraPr>/g)) if (/<hh:align\b[^>]*horizontal="CENTER"/.test(m[0])) hxCenter.add(m[1]); }
   for (const n of names) {
     const doc = new DOMParser().parseFromString(await zip.file(n).async('string'), 'application/xml');
     if (doc.querySelector('parsererror')) throw new Error(n + ' 을(를) 읽지 못했습니다');
@@ -5363,7 +5386,7 @@ async function hxBuild(f) {
   }
   const out = [];
   for (const q of probs) {
-    const lines = q.body.map(e => hxLine(e.items)).filter(Boolean), solLines = q.sol.map(e => hxLine(e.items)).filter(Boolean);
+    const lines = q.body.map(hxLineLay).filter(Boolean), solLines = q.sol.map(hxLineLay).filter(Boolean);
     let answer = ''; const sol = [];
     for (const l of solLines) { if (l.startsWith('\u0001')) answer = (answer ? answer + ' ' : '') + l.replace(/\u0001/g, '').trim(); else sol.push(l.replace(/\u0001/g, '')); }
     const figs = [], solFigs = [];
