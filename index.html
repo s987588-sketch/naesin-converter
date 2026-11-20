@@ -4138,7 +4138,9 @@ function textBlocks(s) {
   }
   return out;
 }
-const mathSeg = s => splitMath(s).map(p => p.m != null ? katex.renderToString(toTex(p.m), { throwOnError: false }) : esc(p.t)).join('');
+/* 분수가 있는 식은 한글 수식처럼 분자·분모를 글자 크기 그대로(\displaystyle). 분수 안 분수는 한 단계 작게 */
+const katexTex = t => (/\\[dtc]?frac\b/.test(t) ? '\\displaystyle ' + t : t);
+const mathSeg = s => splitMath(s).map(p => p.m != null ? katex.renderToString(katexTex(toTex(p.m)), { throwOnError: false }) : esc(p.t)).join('');
 /* 한 줄: 줄 배치 표시 {가운데}·{들여}(줄 맨 앞), {탭}(줄 가운데) */
 const LAY_RE = /^\{(가운데|들여)\}/;
 function mathLine(s) {
