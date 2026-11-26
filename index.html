@@ -5778,6 +5778,24 @@ function hwpxWriter(opt = {}) {
   const HEAD = R(CHAR.body, (opt.secPr || SECPR) + COLPR) + R(CHAR.body, `<hp:ctrl><hp:pageNum pos="BOTTOM_CENTER" formatType="DIGIT" sideChar="${opt.secPr ? '' : '-'}"/></hp:ctrl>`);
   /* 테두리 없는 한 칸짜리 표(높이 고정): 2×2·2×3 배열에서 문제 한 칸 */
   const BOX = (inner, w, h) => `<hp:tbl id="${oid++}" zOrder="${oid}" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="NONE" repeatHeader="0" rowCnt="1" colCnt="1" cellSpacing="0" borderFillIDRef="1" noAdjust="0"><hp:sz width="${w}" widthRelTo="ABSOLUTE" height="${h}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="1"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">${inner}</hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${w}" height="${h}"/><hp:cellMargin left="0" right="0" top="0" bottom="0"/></hp:tc></hp:tr></hp:tbl>`;
+  /* {탭}으로 나뉜 줄(⑴ ⑵ ⑶ ⑷): 테두리 없는 표의 같은 너비 칸에 하나씩 넣어 교과서처럼 칸을 맞춤.
+     한 칸에 안 들어가는 식이 있으면 두 칸씩, 그래도 넓으면 한 줄에 하나씩 */
+  const segW = s => splitMath(s).reduce((a, q) => a + (q.m != null ? (q.m.trim() ? Math.ceil(eqMeasure(toHwp(q.m)).w * 1000) : 0) : [...q.t].reduce((b, c) => b + (/[\u1100-\uFFFF]/.test(c) ? 1000 : 550), 0)), 0);
+  const GRID = (rows, w) => {
+    const nc = Math.max(...rows.map(r => r.length)), cw = Math.floor(w / nc), rh = 1700;
+    const tc = (inner, c, r) => `<hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="1"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">${inner}</hp:subList><hp:cellAddr colAddr="${c}" rowAddr="${r}"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${cw}" height="${rh}"/><hp:cellMargin left="0" right="0" top="0" bottom="0"/></hp:tc>`;
+    return `<hp:tbl id="${oid++}" zOrder="${oid}" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="NONE" repeatHeader="0" rowCnt="${rows.length}" colCnt="${nc}" cellSpacing="0" borderFillIDRef="1" noAdjust="0"><hp:sz width="${cw * nc}" widthRelTo="ABSOLUTE" height="${rh * rows.length}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:inMargin left="0" right="0" top="0" bottom="0"/>${rows.map((r, ri) => `<hp:tr>${Array.from({ length: nc }, (_, ci) => tc(P(PARA.left, r[ci] != null ? line(r[ci]) : R(CHAR.body, '<hp:t/>')), ci, ri)).join('')}</hp:tr>`).join('')}</hp:tbl>`;
+  };
+  /* 한 줄 → 문단(들). para: 문단 모양, prefix: 첫 줄 앞 번호, w: 쓸 수 있는 너비(HWPUNIT) */
+  const LINE = (para, s, prefix, w) => {
+    if (!/\{탭\}/.test(s)) return P(para, line(s, prefix));
+    const segs = String(s).replace(LAY_RE, '').split('{탭}').map(x => x.trim()); if (prefix) segs[0] = prefix + segs[0];
+    const ws = segs.map(segW), fit = k => ws.every(x => x <= (w / k) * 0.97);
+    const k = fit(segs.length) ? segs.length : segs.length >= 4 && segs.length % 2 === 0 && fit(2) ? 2 : 0;
+    if (!k) return segs.map(x => P(PARA.left, line(x))).join('');
+    const rows = []; for (let i = 0; i < segs.length; i += k) rows.push(segs.slice(i, i + k));
+    return P(PARA.left, R(CHAR.body, GRID(rows, w) + '<hp:t/>'));
+  };
   const pack = (body, prv) => {
   const section = `${XMLH}<hs:sec ${NS}>${body}</hs:sec>`;
     const hpf = `${XMLH}<opf:package ${NS} version="" unique-identifier="" id=""><opf:metadata><opf:title/><opf:language>ko</opf:language></opf:metadata><opf:manifest><opf:item id="header" href="Contents/header.xml" media-type="application/xml"/>${bins.map(b => `<opf:item id="${b.id}" href="BinData/${b.id}.png" media-type="image/png" isEmbeded="1"/>`).join('')}<opf:item id="section0" href="Contents/section0.xml" media-type="application/xml"/><opf:item id="settings" href="settings.xml" media-type="application/xml"/></opf:manifest><opf:spine><opf:itemref idref="header" linear="yes"/><opf:itemref idref="section0" linear="yes"/></opf:spine></opf:package>`;
@@ -5806,7 +5824,7 @@ function hwpxWriter(opt = {}) {
   const FRAME = (title, paras, w) => BOX((title === '보기' ? P(PARA.left, R(CHAR.bold, T('〈보기〉'))) : '') + paras, w, 1200)
     .replace(/borderFillIDRef="1"/g, 'borderFillIDRef="@FRAMEBF@"').replace('hasMargin="0"', 'hasMargin="1"')
     .replace('<hp:cellMargin left="0" right="0" top="0" bottom="0"/>', '<hp:cellMargin left="567" right="567" top="283" bottom="283"/>');
-  return { P, R, T, EQ, PIC, BOX, FRAME, BIN, PAGEPIC, HIDE, NOTE, NOTENUM, line, HEAD, pack };
+  return { P, R, T, EQ, PIC, BOX, FRAME, BIN, PAGEPIC, HIDE, NOTE, NOTENUM, line, LINE, HEAD, pack };
 }
 /* 디자인 양식의 구역 설정: 속지 틀 안쪽(위 36mm, 아래 22mm, 왼쪽 제본 여백+14mm, 오른쪽 14mm), 머리말·꼬리말 0,
    쪽 배경은 그림 채우기 테두리/배경(bfId) */
@@ -5834,14 +5852,14 @@ function figRows(figs) {
   return rows.map(r => { const sum = r.reduce((a, f) => a + (f.photo ? 0 : f.w), 0), k = r.length > 1 && sum > 205 ? 205 / sum : 1; return k < 1 ? r.map(f => ({ ...f, w: f.w * k, h: f.h * k })) : r; });
 }
 function hwpxBuild(list, opt) {
-  const { P, R, T, PIC, FRAME, line, HEAD, pack } = hwpxWriter();
+  const { P, R, T, PIC, FRAME, line, LINE, HEAD, pack } = hwpxWriter();
   let body = P(PARA.left, HEAD + R(CHAR.body, '<hp:t/>'));
   let n = 0, lastMid = null; const prv = [];
   for (const it of list) {
     if (it.mid !== lastMid) { n = 0; lastMid = it.mid; }
     n++;
     if (opt.src) body += P(PARA.right, R(CHAR.src, T(it.src ?? sourceText(it))));
-    textBlocks(it.text).forEach((b, i) => { body += b.box ? P(PARA.left, R(CHAR.body, FRAME(b.box, b.lines.map(l => P(/^\{가운데\}/.test(l) ? PARA.center : PARA.left, line(l))).join(''), COL_W - 600) + '<hp:t/>')) : P(/^\{가운데\}/.test(b.s) ? PARA.center : PARA.left, line(b.s, i === 0 ? n + '. ' : '')); });
+    textBlocks(it.text).forEach((b, i) => { body += b.box ? P(PARA.left, R(CHAR.body, FRAME(b.box, b.lines.map(l => LINE(/^\{가운데\}/.test(l) ? PARA.center : PARA.left, l, '', COL_W - 1800)).join(''), COL_W - 600) + '<hp:t/>')) : LINE(/^\{가운데\}/.test(b.s) ? PARA.center : PARA.left, b.s, i === 0 ? n + '. ' : '', COL_W - 200); });
     for (const g of figRows(it.figs)) body += P(PARA.center, R(CHAR.body, g.map(f => PIC(f)).join('<hp:t>    </hp:t>') + '<hp:t/>'));
     if (opt.ans && it.answer) body += P(PARA.left, R(CHAR.bold, T('정답 ')) + line(it.answer));
     body += P(PARA.left, R(CHAR.body, '<hp:t/>')) + P(PARA.left, R(CHAR.body, '<hp:t/>'));
@@ -6964,7 +6982,7 @@ function bookHwpx(items, opt) {
   const bfId = dz ? +/<hh:borderFills itemCnt="(\d+)">/.exec(headerXml())[1] + 1 : 0;
   const W = hwpxWriter(dz ? { secPr: dzSecPr(dz.margin, bfId), header: h => (dz.font ? titleFontHeader(dzHeader(h, 'image1', 'image2'), dz.font.name) : dzHeader(h, 'image1', 'image2')) } : {});
   const CS = dz && dz.font ? CHAR_T.src : CHAR.src, CB = dz && dz.font ? CHAR_T.bold : CHAR.bold;   // 속지 머리말(오른쪽 위 단원명) 글자 모양
-  const { P, R, T, PIC, BOX, line, HEAD, pack } = W;
+  const { P, R, T, PIC, BOX, line, LINE, HEAD, pack } = W;
   const colW = dz ? Math.floor((59528 - Math.round(dz.margin * MM) - Math.round(14 * MM) * 2 - 2268) / 2) : COL_W;
   const bodyH = dz ? 84186 - Math.round(36 * MM) - Math.round(22 * MM) : BODY_H;
   const rows = +opt.grid, slot = Math.floor(bodyH / rows) - 500;
@@ -6994,7 +7012,7 @@ function bookHwpx(items, opt) {
     const newMid = it.mid !== lastMid; lastMid = it.mid;
     if (newMid) inner += P(PARA.left, R(CHAR.bold, T('■ ' + it.mid)));
     if (opt.src) inner += P(PARA.right, R(CHAR.src, T(it.src)));
-    textBlocks(it.text).forEach((b, i) => { inner += b.box ? P(PARA.left, R(CHAR.body, W.FRAME(b.box, b.lines.map(l => P(/^\{가운데\}/.test(l) ? PARA.center : PARA.left, line(l))).join(''), (opt.endnote ? colW - 800 : colW) - 600) + '<hp:t/>')) : P(/^\{가운데\}/.test(b.s) ? PARA.center : PARA.left, line(b.s, i === 0 ? it.n + '. ' : '')); });
+    textBlocks(it.text).forEach((b, i) => { inner += b.box ? P(PARA.left, R(CHAR.body, W.FRAME(b.box, b.lines.map(l => LINE(/^\{가운데\}/.test(l) ? PARA.center : PARA.left, l, '', (opt.endnote ? colW - 800 : colW) - 1800)).join(''), (opt.endnote ? colW - 800 : colW) - 600) + '<hp:t/>')) : LINE(/^\{가운데\}/.test(b.s) ? PARA.center : PARA.left, b.s, i === 0 ? it.n + '. ' : '', (opt.endnote ? colW - 800 : colW) - 200); });
     for (const g of figRows(it.figs)) inner += P(PARA.center, R(CHAR.body, g.map(f => PIC(f.photo ? { ...f, maxH: (it.two ? slot * 2 + 500 : slot) - 3000 } : f)).join('<hp:t>    </hp:t>') + '<hp:t/>'));
     if (opt.teacher && it.answer) inner += P(PARA.left, R(CHAR.bold, T('정답 ')) + line(it.answer));
     /* 해설을 미주로: 칸(표) 바로 뒤에 미주 표시를 두고(칸 폭을 조금 줄여 같은 줄에), 내용은 [중단원 번호] 정답 + 해설 */
