@@ -291,6 +291,18 @@ label:has(> input[type=checkbox]), label:has(> input[type=radio]) { display: inl
       <div id="bk-kinds" class="chk-col"></div>
       <label><input type="checkbox" id="bk-arch"> 보관한 문제도 포함</label>
     </div>
+    <div class="bk-sec"><b>출판사·교재</b> <span class="note">체크한 교재·학교의 문제만 모읍니다</span>
+      <div id="bk-books" class="chk-col"></div>
+    </div>
+    <div class="bk-sec"><b>문제 종류</b> <span class="note">교과서의 문제·예제·마무리 등</span>
+      <div id="bk-types" class="chk-col"></div>
+      <label><input type="checkbox" id="bk-rep"> 대표 문제(★)만</label>
+    </div>
+    <div class="bk-sec"><b>문제 수</b> <span class="note">0이나 빈칸이면 전부</span>
+      <div class="row"><label class="f">소단원마다<input id="bk-per" type="number" min="0" style="width:64px"></label><label class="f">전체<input id="bk-total" type="number" min="0" style="width:64px"></label></div>
+      <div class="row"><label><input type="checkbox" id="bk-rand"> 무작위로 뽑기</label><button id="bk-reroll" title="무작위로 다시 뽑습니다">다시 뽑기</button></div>
+      <p class="note" id="bk-pick"></p>
+    </div>
     <div class="bk-sec"><b>단원</b> <span class="note">중단원을 누르면 그 아래 소단원이 모두 선택됩니다.</span>
       <div id="bk-units"></div>
     </div>
@@ -6590,14 +6602,14 @@ $('#rp-go').onclick = async () => {
 const BK_KINDS = ['교과서', '교사용 평가자료', '시중교재', '기출', '시험지', '학교 프린트'];
 const BK_LS = 'naesin-book-v1';
 const bk = (() => { try { return JSON.parse(localStorage.getItem(BK_LS)) || {}; } catch (e) { return {}; } })();
-Object.assign(bk, { photos: bk.photos || [], photoMid: bk.photoMid || '', subj: bk.subj || '공통수학2', kinds: bk.kinds || BK_KINDS.slice(), units: bk.units || [], order: bk.order || {}, off: bk.off || [], two: bk.two || [], arch: !!bk.arch, name: bk.name || '', grid: bk.grid || '2', src: bk.src ?? true, teacher: !!bk.teacher, ansSrc: !!bk.ansSrc });
+Object.assign(bk, { photos: bk.photos || [], photoMid: bk.photoMid || '', subj: bk.subj || '공통수학2', kinds: bk.kinds || BK_KINDS.slice(), units: bk.units || [], order: bk.order || {}, off: bk.off || [], two: bk.two || [], arch: !!bk.arch, noBooks: bk.noBooks || [], noTypes: bk.noTypes || [], repOnly: !!bk.repOnly, per: +bk.per || 0, total: +bk.total || 0, rand: !!bk.rand, seed: +bk.seed || 1, name: bk.name || '', grid: bk.grid || '2', src: bk.src ?? true, teacher: !!bk.teacher, ansSrc: !!bk.ansSrc });
 let bkRecs = [];
 /* 디자인 양식 쓰기(dz)와 넣을 쪽 */
 const DZ_KEYS = { dzv: 2, dz: true, dzCover: true, dzToc: true, dzUnit: true, dzOdd: true, dzWrong: false };
 for (const [k, v] of Object.entries(DZ_KEYS)) if (bk[k] == null) bk[k] = v;
 /* 디자인 → 문제 고르기 → 교재 흐름이라 디자인 양식은 처음부터 켬(예전에 꺼 둔 것도 한 번 켬) */
 if (bk.dzv !== 2) { bk.dz = true; bk.dzv = 2; }
-function bkSave() { const { subj, kinds, units, order, off, two, arch, name, grid, src, teacher, ansSrc, photos, photoMid } = bk; try { localStorage.setItem(BK_LS, JSON.stringify({ subj, kinds, units, order, off, two, arch, name, grid, src, teacher, ansSrc, photos, photoMid, endnote: bk.endnote, ...Object.fromEntries(Object.keys(DZ_KEYS).map(k => [k, bk[k]])) })); } catch (e) { } }
+function bkSave() { const { subj, kinds, units, order, off, two, arch, name, grid, src, teacher, ansSrc, photos, photoMid } = bk; try { localStorage.setItem(BK_LS, JSON.stringify({ subj, kinds, units, order, off, two, arch, name, grid, src, teacher, ansSrc, photos, photoMid, endnote: bk.endnote, noBooks: bk.noBooks, noTypes: bk.noTypes, repOnly: bk.repOnly, per: bk.per, total: bk.total, rand: bk.rand, seed: bk.seed, ...Object.fromEntries(Object.keys(DZ_KEYS).map(k => [k, bk[k]])) })); } catch (e) { } }
 /* 화면: 'conv' 문제 변환 | 'design' 디자인 | 'book' 교재 만들기 (true/false 는 예전 호출: 교재/변환) */
 function setView(v) {
   v = v === true ? 'book' : v === false ? 'conv' : v;
@@ -6768,12 +6780,31 @@ $('#ph-go').onclick = async () => {
 };
 
 /* 고른 단원의 문제를 중단원 → 소단원 → 자료 종류 → 교재 → 쪽·파일 순으로, 끌어 바꾼 순서가 있으면 그것을 따름 */
+/* 출판사·교재(학교), 문제 종류: 고르는 칸의 이름 */
+const bkBook = r => String(r.교재 || r.출판사 || '(이름 없음)').trim() || '(이름 없음)';
+const bkType = r => String(r.종류 || '문제').trim() || '문제';
+/* 과목·자료 종류·보관·단원으로 고른 문제(출판사·종류·수 고르기 전) */
+function bkBase() { const sel = new Set(bk.units); return bkRecs.filter(r => r.과목 === bk.subj && bk.kinds.includes(r.자료) && (bk.arch || !r.보관) && sel.has(r.중단원 + '|' + r.소단원)); }
+/* 무작위 뽑기: 씨앗(seed)과 파일 경로로 정해지는 순서라 '다시 뽑기' 전까지는 늘 같은 문제 */
+const bkRnd = key => { let h = 2166136261 ^ bk.seed; for (const c of String(key)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967296; };
+function bkPick(list, n) {
+  if (!(n > 0) || list.length <= n) return list;
+  const chosen = new Set((bk.rand ? list.slice().sort((a, b) => bkRnd(a._path) - bkRnd(b._path)) : list).slice(0, n));
+  return list.filter(r => chosen.has(r));
+}
+let bkPickInfo = { from: 0, to: 0 };
 function bkGroups() {
-  const U = UNITS[bk.subj] || {}, mids = Object.keys(U), sel = new Set(bk.units);
-  const recs = bkRecs.filter(r => r.과목 === bk.subj && bk.kinds.includes(r.자료) && (bk.arch || !r.보관) && sel.has(r.중단원 + '|' + r.소단원));
+  const U = UNITS[bk.subj] || {}, mids = Object.keys(U);
+  const noB = new Set(bk.noBooks), noT = new Set(bk.noTypes);
+  let recs = bkBase().filter(r => !noB.has(bkBook(r)) && !noT.has(bkType(r)) && (!bk.repOnly || r.대표));
   const key = r => [mids.indexOf(r.중단원), (U[r.중단원] || []).indexOf(r.소단원), BK_KINDS.indexOf(r.자료)];
   const pg = r => parseInt(r.쪽, 10) || 0;
-  recs.sort((a, b) => { const x = key(a), y = key(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return a.교재.localeCompare(b.교재) || pg(a) - pg(b) || a.파일.localeCompare(b.파일); });
+  recs.sort((a, b) => { const x = key(a), y = key(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return String(a.교재 || '').localeCompare(String(b.교재 || '')) || pg(a) - pg(b) || String(a.파일 || '').localeCompare(String(b.파일 || '')); });
+  /* 문제 수: 소단원마다 N개 → 전체 N개 (무작위면 씨앗 순서, 아니면 앞에서부터). 고른 순서(소단원 순)는 그대로 */
+  const before = recs.length;
+  if (bk.per > 0) { const by = new Map(); for (const r of recs) { const k = r.중단원 + '|' + r.소단원; if (!by.has(k)) by.set(k, []); by.get(k).push(r); } const keep = new Set([...by.values()].flatMap(g => bkPick(g, bk.per))); recs = recs.filter(r => keep.has(r)); }
+  if (bk.total > 0) recs = bkPick(recs, bk.total);
+  bkPickInfo = { from: before, to: recs.length };
   /* 사진 문제: 넣을 곳이 중단원 이름이면 그 중단원 끝에, 아니면 따로 묶음(넣은 순서) */
   const photoRecs = bk.photos.map(photoRec);
   for (const r of photoRecs) if (!mids.includes(r.중단원)) mids.push(r.중단원);
@@ -6795,6 +6826,11 @@ function bkRender() {
   $('#bk-subj').innerHTML = Object.keys(UNITS).map(k => `<option ${k === bk.subj ? 'selected' : ''}>${k}</option>`).join('');
   $('#bk-kinds').innerHTML = BK_KINDS.map(k => `<label><input type="checkbox" data-kind="${k}" ${bk.kinds.includes(k) ? 'checked' : ''}> ${k} <span class="u-cnt">${bkRecs.filter(r => r.과목 === bk.subj && r.자료 === k).length}</span></label>`).join('');
   $('#bk-arch').checked = bk.arch;
+  { const base = bkBase(), cnt = (f, v) => base.filter(r => f(r) === v).length;
+    const books = [...new Set(base.map(bkBook))].sort((a, b) => a.localeCompare(b)), types = [...new Set(base.map(bkType))].sort((a, b) => KIND_ORDER.indexOf(a) - KIND_ORDER.indexOf(b));
+    $('#bk-books').innerHTML = books.length ? books.map(b => `<label><input type="checkbox" data-book="${esc(b)}" ${bk.noBooks.includes(b) ? '' : 'checked'}> ${esc(b)} <span class="u-cnt">${cnt(bkBook, b)}</span></label>`).join('') : '<span class="note">단원을 고르면 그 범위의 교재·학교가 나옵니다</span>';
+    $('#bk-types').innerHTML = types.length ? types.map(t => `<label><input type="checkbox" data-type="${esc(t)}" ${bk.noTypes.includes(t) ? '' : 'checked'}> ${esc(t)} <span class="u-cnt">${cnt(bkType, t)}</span></label>`).join('') : '<span class="note">단원을 고르면 그 범위의 문제 종류가 나옵니다</span>'; }
+  $('#bk-rep').checked = bk.repOnly; $('#bk-per').value = bk.per || ''; $('#bk-total').value = bk.total || ''; $('#bk-rand').checked = bk.rand; $('#bk-reroll').disabled = !bk.rand;
   const U = UNITS[bk.subj] || {}, sel = new Set(bk.units);
   const cnt = (mid, sub) => bkRecs.filter(r => r.과목 === bk.subj && bk.kinds.includes(r.자료) && (bk.arch || !r.보관) && r.중단원 === mid && (sub == null || r.소단원 === sub)).length;
   const B = BIG[bk.subj] || {};
@@ -6839,13 +6875,20 @@ function bkRenderList() {
 function bkSummary() {
   const nb = bkNumbered(), per = 2 * +bk.grid, slots = nb.reduce((a, x) => a + (x.two ? 2 : 1), 0);
   $('#bk-sum').textContent = nb.length ? `문제 ${nb.length}개 · 약 ${Math.ceil(slots / per)}쪽 이상 (중단원마다 새 쪽에서 시작)` : '';
+  const pk = $('#bk-pick'); if (pk) pk.textContent = bkPickInfo.to < bkPickInfo.from ? `고른 범위 ${bkPickInfo.from}문제 중 ${bkPickInfo.to}문제를 뽑았습니다${bk.rand ? '(무작위)' : '(앞에서부터)'}` : '';
 }
 /* 과목을 바꾸면 앞 과목에서 고른 것(단원·넣은 사진 문제·뺀 문제·두 칸·순서)을 모두 풂 */
-$('#bk-subj').onchange = e => { bk.subj = e.target.value; Object.assign(bk, { units: [], photos: [], photoMid: '', off: [], two: [], order: {} }); bkSave(); bkRender(); };
+$('#bk-subj').onchange = e => { bk.subj = e.target.value; Object.assign(bk, { units: [], photos: [], photoMid: '', off: [], two: [], order: {}, noBooks: [], noTypes: [] }); bkSave(); bkRender(); };
 $('#v-book').addEventListener('change', e => {
   const t = e.target, d = t.dataset;
   if (d.kind) bk.kinds = BK_KINDS.filter(k => document.querySelector(`[data-kind="${k}"]`).checked);
   if (t.id === 'bk-arch') bk.arch = t.checked;
+  if (d.book != null) bk.noBooks = t.checked ? bk.noBooks.filter(b => b !== d.book) : [...new Set(bk.noBooks.concat(d.book))];
+  if (d.type != null) bk.noTypes = t.checked ? bk.noTypes.filter(b => b !== d.type) : [...new Set(bk.noTypes.concat(d.type))];
+  if (t.id === 'bk-rep') bk.repOnly = t.checked;
+  if (t.id === 'bk-per') bk.per = Math.max(0, parseInt(t.value, 10) || 0);
+  if (t.id === 'bk-total') bk.total = Math.max(0, parseInt(t.value, 10) || 0);
+  if (t.id === 'bk-rand') bk.rand = t.checked;
   if (d.big) { const us = BIG[bk.subj][d.big].flatMap(m => (UNITS[bk.subj][m] || []).map(sb => m + '|' + sb)); bk.units = bk.units.filter(u => !us.includes(u)).concat(t.checked ? us : []); }
   if (d.mid) { const subs = UNITS[bk.subj][d.mid].map(sb => d.mid + '|' + sb); bk.units = bk.units.filter(u => !subs.includes(u)).concat(t.checked ? subs : []); }
   if (d.unit) bk.units = t.checked ? [...new Set(bk.units.concat(d.unit))] : bk.units.filter(u => u !== d.unit);
@@ -6859,9 +6902,10 @@ $('#v-book').addEventListener('change', e => {
   if (t.id === 'bk-endnote') bk.endnote = t.checked;
   if (t.id && t.id.startsWith('bk-dz')) { bk[t.id.slice(3)] = t.checked; $('#dz-sub').hidden = !bk.dz; if (t.id === 'bk-dz') dzInfo(); }
   bkSave();
-  if (d.kind || d.big || d.mid || d.unit || t.id === 'bk-arch') bkRender(); else if (row) bkRenderList(); else bkSummary();
+  if (d.kind || d.big || d.mid || d.unit || t.id === 'bk-arch') bkRender(); else if (d.book != null || d.type != null || /^bk-(rep|per|total|rand)$/.test(t.id)) { $('#bk-reroll').disabled = !bk.rand; bkRenderList(); } else if (row) bkRenderList(); else bkSummary();
 });
 $('#bk-name').oninput = e => { bk.name = e.target.value.trim(); bkSave(); };
+$('#bk-reroll').onclick = () => { bk.seed = (bk.seed || 1) + 1; bkSave(); bkRenderList(); };
 $('#bk-list').addEventListener('click', e => {
   const b = e.target.closest('[data-ph-del]'); if (!b) return;
   const path = b.closest('.bq').dataset.path.replace(/^photo:/, '');
