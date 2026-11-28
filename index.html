@@ -3494,7 +3494,7 @@ function autoUnits(list) {
 /* ── 상태 ── */
 const state = { subj: '공통수학2', pub: '비상', kind: '교과서', wbSec: '소단원 확인', book: '', items: [], selId: null, pageNo: 1, fileName: '' };
 let pdf = null, pages = {}, scale = 1.4, addMode = false, keyDoc = null;
-const KIND_ORDER = ['예제', '함께', '문제', '역량', '수행', '기초', '기본', '표준', '도전', '발전', '확인', '생각쑥', '생각KEY', '생각넓히기', '탐구&융합', '이미지', '대단원', '익힘', '소단원', '중단원', '직접'];
+const KIND_ORDER = ['익히기', '필수', '발전', '확인', 'STEP1', 'STEP2', '실력UP', '예제', '함께', '문제', '역량', '수행', '기초', '기본', '표준', '도전', '발전', '확인', '생각쑥', '생각KEY', '생각넓히기', '탐구&융합', '이미지', '대단원', '익힘', '소단원', '중단원', '직접'];
 /* 문제북 평가 구분 → 출처 이름 */
 const WB_LABEL = { 소단원: '소단원 확인', 중단원: '중단원 수준별', 대단원: '대단원 TEST' };
 
@@ -3852,6 +3852,17 @@ function decode(c) {
   if (ch === '′' || ch === '″') return { m: ch === '′' ? "'" : "''" };
   if (/^DXN/.test(f) && /[△∠]/.test(ch)) return { m: ch };
   if (ch === '\u0008') return { t: '' };
+  /* 개념원리(BT 수식 글꼴): 글자 그대로가 수식. ^ 뒤 숫자는 위첨자, ᑂ… 는 아래첨자(₀~₉, ᑌ…는 a~z),
+     BTsusich-Regular 의 \ 는 ×, BTperiod 의 c 는 ⋯, BTsign 의 L 은 ≠ */
+  if (/^BT/.test(f)) {
+    if (/^BTperiod/.test(f)) return { m: ch === 'c' ? '⋯' : ch };
+    if (/^BTsign/.test(f)) return { m: { L: '≠' }[ch] ?? ch };
+    if (/^BTsusich-safe-input-Regular/.test(f) && ch === '\\') return { m: '×' };
+    const cp = ch.codePointAt(0);
+    if (cp >= 0x1442 && cp <= 0x144B) return { m: '_' + (cp - 0x1442) };
+    if (cp >= 0x144C && cp <= 0x1465) return { m: '_' + String.fromCharCode(97 + cp - 0x144C) };
+    return { m: ch };
+  }
   /* 미래엔 등 EH 수식 글꼴. 문자 코드가 없는 KSC 글꼴(그림 속 글자)은 버림 */
   if (/^EH/.test(f)) {
     if (/KSC/.test(f)) return { m: '' };
@@ -3940,7 +3951,7 @@ function extractText(P, box, skip = [], figs = [], opt = {}) {
   }
   const fracs = cs2 => {
     const txt = cs2.filter(c => !isM(c)), ref = (txt.length ? txt : cs2).map(c => c.base).sort((a, b) => a - b);
-    const sz = cs2[0].size;
+    const sz = (cs2.find(c => c.ch.trim()) || cs2[0]).size;   // 맨 앞의 빈칸(번호 글꼴의 큰 빈칸 등)이 아니라 첫 글자 크기
     /* 가운데 줄: =·≥ 같은 관계 기호가 있고 그 위·아래에 글자가 있으면 그 높이, 없으면 보통 글자 높이의 가운데값(분자가 길면 가운데값이 분자 쪽에 걸림) */
     const split = main => [cs2.filter(c => isM(c) && c.ch.trim() && c.base < main - sz * 0.3), cs2.filter(c => isM(c) && c.ch.trim() && c.base > main + sz * 0.3)];
     const alt = cs2.filter(c => c.ch.trim() && /[=<>≤≥]/.test(decode(c).m ?? c.ch)).map(c => c.base).find(b => split(b).every(a => a.length));
@@ -4440,19 +4451,99 @@ async function reread(it, keepEdits) {
 }
 function sortItems() { state.items.sort((a, b) => (a.hwpx || b.hwpx ? (a.hwpx ? 1e9 : 0) - (b.hwpx ? 1e9 : 0) || a.ord - b.ord : 0) || a.pdfPage - b.pdfPage || (a.box && b.box ? (a.box.x0 > (pages[a.pdfPage]?.w || 600) / 2) - (b.box.x0 > (pages[b.pdfPage]?.w || 600) / 2) || a.box.y0 - b.box.y0 : (a.ord || 0) - (b.ord || 0))); }
 
+/* ── 개념원리(시중교재) 문제 찾기 ──
+   번호: 개념원리 익히기·확인체크·연습문제(STEP 1·2·실력 UP)는 DINPro-Bold 15pt(61, 62 …), 필수·발전 예제는 DIN-Bold 19pt(01 …).
+   구역 표시(확인체크·실력 UP·필수/발전 띠·연습문제 머리)는 그림이라 쪽 그림의 색으로 가림:
+   발전·실력 UP 띠는 빨강, 필수·확인체크는 청록·파랑, 연습문제 쪽은 머리가 보라. 오른쪽 '알아 둡시다!·생각해 봅시다!' 칸(세로줄 오른쪽)은 뺌 */
+const GN_KINDS = ['익히기', '필수', '발전', '확인', 'STEP1', 'STEP2', '실력UP'];
+function isGN(P) {
+  if (/개념원리/.test(`${state.pub || ''} ${state.book || ''}`)) return true;
+  return P.chars.some(c => /DINPro-Bold/.test(c.font) && c.size >= 14 && c.size < 17) && P.chars.some(c => /YDVYGO/.test(c.font)) && !P.chars.some(c => /^(문제|예제)$/.test(c.ch));
+}
+async function gnProbe(P) {
+  if (P._probe) return P._probe;
+  const vp = P.page.getViewport({ scale: 1 }), c = document.createElement('canvas'); c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  await P.page.render({ canvasContext: g, viewport: vp }).promise;
+  return (P._probe = { d: g.getImageData(0, 0, c.width, c.height).data, w: c.width, h: c.height });
+}
+/* 네모 칸(pt) 안에서 조건에 맞는 색의 점 수 */
+function gnCount(pr, x0, y0, x1, y1, test) {
+  let n = 0; const X0 = Math.max(0, Math.round(x0)), X1 = Math.min(pr.w, Math.round(x1)), Y0 = Math.max(0, Math.round(y0)), Y1 = Math.min(pr.h, Math.round(y1));
+  for (let y = Y0; y < Y1; y++) for (let x = X0; x < X1; x++) { const i = (y * pr.w + x) * 4; if (test(pr.d[i], pr.d[i + 1], pr.d[i + 2])) n++; }
+  return n;
+}
+const gnRed = (r, g, b) => r > 110 && r - g > 50 && r - b > 25;
+const gnPurple = (r, g, b) => b > 120 && b - r > 30 && b - g > 30 && r < 170;
+async function detectGN(P, carry) {
+  const pr = await gnProbe(P), W = words(P.chars);
+  const pnw = W.filter(w => /^\d{1,3}$/.test(w.text) && /CenturyGothic/.test(w.font) && w.base > P.h * 0.9);
+  const pageNum = pnw.length ? pnw[0].text : P.pageNum;
+  const footY = Math.min(P.footY, ...pnw.map(w => w.top - 4));
+  /* 세로줄(오른쪽 날개 칸 경계) */
+  const vr = (P.gfx || []).filter(g => g.x1 - g.x0 < 2.5 && g.y1 - g.y0 > P.h * 0.35 && g.x0 > P.w * 0.55 && g.x0 < P.w * 0.92).sort((a, b) => a.x0 - b.x0)[0];
+  const xR = vr ? vr.x0 - 4 : P.w * 0.9;
+  const ex = W.filter(w => /^\d{2}$/.test(w.text) && /DIN-Bold/.test(w.font) && w.size >= 17 && w.base < footY);
+  const nums = W.filter(w => /^\d{1,3}$/.test(w.text) && /DINPro-Bold/.test(w.font) && w.size >= 14 && w.size < 17 && w.x0 < P.w * 0.3 && w.base < footY);
+  const steps = W.filter(w => w.text === 'STEP' && w.base < footY).map(w => ({ w, n: (W.find(d => /^\d$/.test(d.text) && d.x0 > w.x1 - 1 && d.x0 - w.x1 < 12 && Math.abs(d.base - w.base) < 4) || {}).text || '1' }));
+  const drill = gnCount(pr, 40, 15, 260, 62, gnPurple) > 150;   // 연습문제 첫 쪽(머리가 보라)
+  const teal = gnCount(pr, 40, 15, 260, 62, (r, g, b) => g > 150 && b > 150 && g - r > 30) > 80;   // 개념원리 익히기 머리(청록)
+  /* 예제·STEP 이 없는 쪽: 청록 머리면 익히기, 보라 머리면 연습문제 시작, 둘 다 아니면(연습문제 다음 쪽 등) 앞 구역을 이어감 */
+  const DRILL = /^(STEP1|STEP2|실력UP)$/;
+  if (!ex.length && !steps.length) carry.gnSec = teal ? '익히기' : drill ? (DRILL.test(carry.gnSec) ? carry.gnSec : 'STEP1') : (carry.gnSec || '익히기');
+  const marks = [...ex.map(w => ({ t: 'ex', w })), ...nums.map(w => ({ t: 'n', w })), ...steps.map(o => ({ t: 'step', w: o.w, n: o.n }))].sort((a, b) => a.w.base - b.w.base);
+  const KEY = W.filter(w => w.text === 'KEY');
+  const labs = W.filter(w => /^(설명|풀이)$/.test(w.text) && w.size < 8.5 && w.size > 7);
+  const body = P.chars.filter(c => c.base < footY && c.ch.trim() && !c.hid && c.x < xR);
+  const out = [];
+  marks.forEach((m, i) => {
+    if (m.t === 'step') { carry.gnSec = 'STEP' + m.n; return; }
+    const w = m.w;
+    let kind;
+    if (m.t === 'ex') { kind = gnCount(pr, w.x0 - 44, w.top - 6, w.x0 - 2, w.bot + 6, gnRed) > 30 ? '발전' : '필수'; carry.gnSec = '확인'; }
+    else {
+      if (drill || DRILL.test(carry.gnSec)) { if (gnCount(pr, w.x0 - 4, w.top - 32, w.x0 + 52, w.top - 4, gnRed) > 40) carry.gnSec = '실력UP'; }
+      kind = carry.gnSec || '익히기';
+    }
+    const nx = marks.slice(i + 1).find(o => o.w.base > w.base + 2);
+    const xL = Math.max(10, w.x0 - 3), top = w.top - 4;
+    let bottom = nx ? nx.w.top - 4 : footY - 4;
+    let solY = null;
+    if (m.t === 'ex') {
+      const k = KEY.find(o => o.top > w.bot && o.top < bottom); if (k) bottom = k.top - 8;
+      const l = labs.filter(o => o.top > w.bot && o.bot < bottom).sort((a, b) => a.top - b.top)[0]; if (l) solY = l.top - 3;
+    }
+    /* 아래쪽 빈 풀이 칸은 빼고 마지막 글자까지 */
+    const inBox = body.filter(c => c.x + c.w / 2 > xL && c.x + c.w / 2 < xR && c.top >= top - 2 && c.bot <= bottom + 2 && c.size >= 7);
+    if (inBox.length) bottom = Math.min(bottom, Math.max(...inBox.map(c => c.bot)) + 6);
+    const box = { x0: xL, y0: Math.max(0, top), x1: xR, y1: bottom };
+    const skip = [...w.chars, ...P.chars.filter(c => c.font === w.font && !c.ch.trim() && Math.abs(c.base - w.base) < 1 && c.x >= w.x0 - 1 && c.x <= w.x1 + w.size), ...P.chars.filter(c => c.size < 7 && c.x + c.w / 2 > xL && c.x + c.w / 2 < xR && c.base > top && c.base < bottom)];   // '정답 및 풀이 14쪽'·'교과서 기출' 같은 작은 글씨
+    /* 필수·발전 예제의 제목(번호 오른쪽 큰 글씨, 예: 미정계수법)은 문제 글에서 빼고 태그로 */
+    let title = '';
+    if (m.t === 'ex') { const tc = P.chars.filter(c => Math.abs(c.base - w.base) < 6 && c.x > w.x1 && c.x < xR && c.size >= 10.5 && c.size < 14).sort((a, b) => a.x - b.x); title = tc.map(c => c.ch).join('').replace(/\s+/g, ' ').trim(); skip.push(...tc); }
+    out.push({ kind, num: w.text, solY, ans: null, area: box, box, skip, gn: true, title });
+  });
+  return { found: out, pageNum };
+}
 /* 문제 찾기: 고른 장 범위만 읽음. 그 범위의 예전 상자는 새로 찾은 것으로 바꾸고, 다른 장의 상자는 그대로 둠 */
 async function analyze(from = 1, to = pdf.numPages) {
   from = Math.max(1, Math.min(pdf.numPages, from)); to = Math.max(from, Math.min(pdf.numPages, to));
   state.items = state.items.filter(x => x.pdfPage < from || x.pdfPage > to);
   const carry = { rules: RULES.rules[state.pub] || [], workbook: state.kind === '교사용 평가자료', wbKind: { '소단원 확인': '소단원', '중단원 수준별': '중단원', '대단원 TEST': '대단원' }[state.wbSec] || '소단원' };
   /* 범위 바로 앞 두 장은 문제를 만들지 않고 "대단원·익힘책·기초/기본/도전" 같은 이어지는 구역 정보만 읽음 */
-  for (let n = Math.max(1, from - 2); n < from; n++) detect(await readPage(n), carry);
+  for (let n = Math.max(1, from - 2); n < from; n++) { const P0 = await readPage(n); if (isGN(P0)) await detectGN(P0, carry); else detect(P0, carry); }
   const fresh = [];
   for (let n = from; n <= to; n++) {
     $('#pginfo').textContent = `문제 찾는 중… ${n} / ${pdf.numPages}장 (${from}~${to}장)`;
     const P = await readPage(n);
-    const { found, pageNum } = detect(P, carry);
-    for (const f of found) { const it = makeItem({ ...f, pdfPage: n }, P, pageNum); await autoFigs(it, P); state.items.push(it); fresh.push(it); }
+    const { found, pageNum } = isGN(P) ? await detectGN(P, carry) : detect(P, carry);
+    for (const f of found) {
+      const it = makeItem({ ...f, pdfPage: n }, P, pageNum); await autoFigs(it, P);
+      /* 개념원리: 번호 아래 왼쪽 여백의 QR 코드(작은 정사각형 그림)는 그림이 아님 */
+      if (f.title) it.tags = [f.title];
+      if (f.gn) it.figs = it.figs.filter(g => !(g.rect && g.rect.x1 < it.box.x0 + 45 && Math.abs((g.rect.x1 - g.rect.x0) - (g.rect.y1 - g.rect.y0)) < 8));
+      state.items.push(it); fresh.push(it);
+    }
   }
   autoUnits(fresh);
   sortItems();
@@ -5574,7 +5665,7 @@ $('#b-del').onclick = () => {
 };
 $('#f-pdf').addEventListener('change', async e => {
   const f = e.target.files[0]; if (!f) return;
-  pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/', cMapPacked: true }).promise; pages = {};
+  pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/', cMapPacked: true, standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/', disableFontFace: true }).promise; pages = {};
   hxPdfMap = null;
   if (state.items.some(x => x.hwpx)) {   // HWPX 문제를 읽은 뒤 연 PDF는 원본 대조용: 문제를 지우거나 다시 찾지 않음
     $('#s-from').value = 1; $('#s-to').value = Math.min(pdf.numPages, AUTO_PAGES);
@@ -5965,7 +6056,7 @@ async function readAnswerKey(doc) {
 $('#f-key').addEventListener('change', async e => {
   const f = e.target.files[0]; if (!f) return;
   if (!state.items.length) { alert('문제 PDF를 먼저 열어 주세요.'); e.target.value = ''; return; }
-  const doc = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/', cMapPacked: true }).promise;
+  const doc = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/', cMapPacked: true, standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/', disableFontFace: true }).promise;
   keyDoc = { doc, name: f.name, pages: {} };
   const entries = await readAnswerKey(doc);
   /* 직접 고친 해설은 그대로 둠(묻고). 취소를 누르면 새로 읽은 해설로 바꿈 */
