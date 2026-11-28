@@ -245,7 +245,7 @@ label:has(> input[type=checkbox]), label:has(> input[type=radio]) { display: inl
   <span class="conv-only"><label class="f">자료 종류<select id="s-kind"><option>교과서</option><option>교사용 평가자료</option><option>시중교재</option><option>기출</option><option>시험지</option><option>학교 프린트</option></select></label></span>
   <span class="conv-only" id="ex-sec" hidden><label class="f">연도<input id="s-year" size="4" placeholder="26"></label><label class="f">학교<input id="s-school" size="7" placeholder="태전고"></label><label class="f">시험<select id="s-exam"><option>중간</option><option>기말</option></select></label></span>
   <span class="conv-only" id="wb-sec" hidden><label class="f">평가 구분<select id="s-wb"><option>소단원 확인</option><option>중단원 수준별</option><option>대단원 TEST</option></select></label></span>
-  <span class="conv-only"><label class="f">정답과 해설 PDF<input type="file" id="f-key" accept="application/pdf"></label></span>
+  <span class="conv-only"><label class="f">정답과 해설 PDF<input type="file" id="f-key" accept="application/pdf"></label><button id="b-aikey" disabled title="글자가 없는(그림으로 된) 해설 PDF를 AI가 읽어 정답·풀이를 문제에 넣습니다(API 키 필요)">AI로 해설 읽기</button></span>
   <span class="conv-only"><label class="f">과목<select id="s-subj"></select></label></span>
   <span class="conv-only"><label class="f" title="교과서는 비워 두세요(출판사+과목, 예: 미래엔 공통수학1 으로 자동 정해집니다). 시중교재는 책 이름(예: 쎈 공통수학1), 시험지·학습지는 시험 이름(예: 26 광남중 2-2 중간). 시험지는 학교 이름으로 폴더가 나뉩니다">교재·시험 이름<input id="s-book" size="16" placeholder="비워 두면 출판사+과목"></label></span>
   <span class="sp"></span>
@@ -394,6 +394,19 @@ label:has(> input[type=checkbox]), label:has(> input[type=radio]) { display: inl
     <label><input type="checkbox" id="api-figcheck"> 그린 뒤 AI가 원본과 비교해 한 번 더 검수(겹침·누락 고치기, 그림마다 API를 한 번 더 써요)</label>
     <label class="f">모델<select id="api-model"><option value="claude-sonnet-5-5">Claude Sonnet 5.5 (권장: 품질·비용 균형)</option><option value="claude-opus-5-5">Claude Opus 5.5 (가장 정확, 비쌈)</option><option value="claude-haiku-5-5">Claude Haiku 5.5 (빠르고 쌈, 그림은 덜 정확)</option></select></label>
     <div class="row" style="justify-content:flex-end"><button id="api-clear" title="이 컴퓨터에서 키 지우기">키 지우기</button><button id="api-cancel">닫기</button><button id="api-save" class="primary">저장</button></div>
+  </div>
+</dialog>
+<dialog id="dlg-aikey" style="max-width:560px;width:92vw">
+  <h2>AI로 해설 읽기</h2>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <p class="note" id="ak-why">이 해설 PDF는 글자가 그림으로 들어 있어 변환기가 직접 읽을 수 없습니다. AI가 해설 쪽 그림을 읽어 문제 번호에 맞춰 넣습니다(API 키 사용, 스캔 변환 탭의 "API 설정").</p>
+    <b>넣을 것</b>
+    <label><input type="radio" name="ak-mode" value="ans" checked> 정답만 <span class="note">(답 칸만. 해설 1쪽에 약 20~40원)</span></label>
+    <label><input type="radio" name="ak-mode" value="all"> 정답 + 풀이 전체 <span class="note">(답 칸 + 해설 칸. 해설 1쪽에 약 80~150원)</span></label>
+    <label class="f">읽을 해설 쪽 <span class="note">(예: 13-17. 문제 쪽의 "정답 및 풀이 ○쪽"을 보고 미리 채웠어요)</span><input id="ak-pages" size="14" placeholder="13-17"></label>
+    <label><input type="checkbox" id="ak-over"> 이미 들어 있는 정답·해설도 새로 읽은 것으로 바꾸기</label>
+    <p class="note" id="ak-status"></p>
+    <div class="row" style="justify-content:flex-end"><button id="ak-cancel">닫기</button><button id="ak-stop" hidden>멈춤</button><button id="ak-go" class="primary">읽기 시작</button></div>
   </div>
 </dialog>
 <dialog id="dlg-ur" style="max-width:640px;width:94vw">
@@ -6059,7 +6072,9 @@ $('#f-key').addEventListener('change', async e => {
   const f = e.target.files[0]; if (!f) return;
   if (!state.items.length) { alert('문제 PDF를 먼저 열어 주세요.'); e.target.value = ''; return; }
   const doc = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/', cMapPacked: true, standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/', disableFontFace: true }).promise;
-  keyDoc = { doc, name: f.name, pages: {} };
+  keyDoc = { doc, name: f.name, pages: {} }; $('#b-aikey').disabled = false;
+  /* 글자가 없는(그림으로 된) 해설 PDF: 직접 못 읽으니 AI로 읽기를 권함 */
+  if (await keyTextless(doc)) { e.target.value = ''; return aiKeyOpen(); }
   const entries = await readAnswerKey(doc);
   /* 직접 고친 해설은 그대로 둠(묻고). 취소를 누르면 새로 읽은 해설로 바꿈 */
   const ed = solEditedCount(entries);
@@ -6069,6 +6084,89 @@ $('#f-key').addEventListener('change', async e => {
   renderList(); renderEditor(); save();
   alert(`해설 ${n.linked}개를 문제에 연결했습니다.` + (n.kept ? `\n직접 고친 해설 ${n.kept}개는 그대로 두었습니다.` : '') + (n.missing ? `\n이 PDF의 문제와 짝이 없는 해설 ${n.missing}개는 건너뛰었습니다.` : ''));
 });
+/* ── AI로 해설 읽기: 글자가 그림으로 된 해설 PDF(개념원리 등) ── */
+async function keyTextless(doc) {
+  const ns = [...new Set([2, Math.ceil(doc.numPages / 2), doc.numPages - 1].filter(n => n >= 1 && n <= doc.numPages))];
+  for (const n of ns) { const tc = await (await doc.getPage(n)).getTextContent(); if (tc.items.map(i => i.str).join('').replace(/[\s\d]/g, '').length > 40) return false; }
+  return true;
+}
+/* 문제마다 '정답 및 풀이 ○쪽' 표시(문제 쪽의 작은 글씨): 그 문제 위쪽에서 가장 가까운 표시, 없으면 그 쪽의 첫 표시 */
+async function itemKeyRefs() {
+  const byPage = new Map();
+  for (const it of state.items) {
+    if (!it.pdfPage || !pdf) continue;
+    if (!byPage.has(it.pdfPage)) {
+      const P = await readPage(it.pdfPage), small = P.chars.filter(c => c.size < 7.5), lines = [];
+      for (const c of small.sort((a, b) => a.base - b.base || a.x - b.x)) { const L = lines.find(l => Math.abs(l.base - c.base) < 1.5); if (L) L.cs.push(c); else lines.push({ base: c.base, cs: [c] }); }
+      byPage.set(it.pdfPage, lines.map(l => ({ base: l.base, m: /정답\s*및\s*풀이\s*(\d+)\s*쪽/.exec(l.cs.sort((a, b) => a.x - b.x).map(c => c.ch).join('')) })).filter(l => l.m).map(l => ({ base: l.base, page: +l.m[1] })));
+    }
+    const refs = byPage.get(it.pdfPage), above = refs.filter(r => it.box && r.base < it.box.y0 + 6).sort((a, b) => b.base - a.base)[0];
+    it.keyRef = (above || refs[0] || {}).page || null;
+  }
+}
+function aiKeyRange() { const rs = state.items.map(x => x.keyRef).filter(Boolean); return rs.length ? `${Math.min(...rs)}-${Math.max(...rs) + 1}` : ''; }
+async function aiKeyOpen() {
+  if (!keyDoc) return alert('먼저 "정답과 해설 PDF"를 열어 주세요.');
+  await itemKeyRefs();
+  $('#ak-pages').value = aiKeyRange(); $('#ak-status').textContent = '';
+  $('#dlg-aikey').showModal();
+}
+$('#b-aikey').onclick = () => aiKeyOpen();
+$('#ak-cancel').onclick = () => $('#dlg-aikey').close();
+const schemaKey = () => obj({ 풀이: { type: 'array', items: obj({ 번호: { type: 'string' }, 구분: { type: 'string' }, 정답: { type: 'string' }, 해설: { type: 'string' } }) } });
+const KEY_PROMPT = mode => `이 이미지는 수학 교재 '정답 및 풀이'의 한 쪽이다. 쪽 안의 풀이를 문제 번호마다 JSON 하나로만 답한다(설명·코드 울타리 없이).
+형식: {"풀이": [{"번호": "인쇄된 문제 번호(예: 63, 01)", "구분": "필수·발전 예제의 풀이면 '필수' 또는 '발전', 아니면 빈칸", "정답": "답 표시(답 상자) 뒤의 내용", "해설": "${mode === 'all' ? '풀이 과정 전체' : '빈칸'}"}]}
+규칙:
+- 쪽 맨 위가 번호 없이 앞 쪽에서 이어지는 풀이로 시작하면 그 부분은 "번호": "이어짐" 으로 맨 앞에 넣는다.
+- 수식은 $…$ LaTeX(분수 \\frac{a}{b}, 지수 x^{2}, 근호 \\sqrt{3}, 켤레 \\overline{z}, 따라서 \\therefore). 소문항 답은 ⑴ ⑵ 로 나눠 한 줄씩.
+${mode === 'all' ? `- 해설: 풀이 과정을 빠짐없이 줄을 바꿔 옮긴다. '다른 풀이'는 "[다른 풀이]" 줄 다음에 이어서, '해설 Focus' 상자는 "[해설 Focus]" 줄 다음에 이어서 넣는다. 조립제법 표처럼 글로 옮기기 어려운 것은 "(조립제법 표 생략)"처럼 짧게 적는다. 답 표시 줄은 해설에 넣지 않는다.` : '- 정답만 옮기고 "해설"은 빈칸으로 둔다.'}
+- 쪽 번호·머리말·워터마크 숫자는 옮기지 않는다.`;
+let akStop = false;
+$('#ak-stop').onclick = () => { akStop = true; if (scanAbortCtl) scanAbortCtl.abort(); $('#ak-status').textContent = '멈추는 중…'; };
+$('#ak-go').onclick = async () => {
+  const conf = apiConf();
+  if (!conf.key) return alert('먼저 API 키를 넣어 주세요("스캔 변환" 탭의 "API 설정").');
+  const mode = document.querySelector('input[name=ak-mode]:checked').value, over = $('#ak-over').checked;
+  const max = keyDoc.doc.numPages, set = new Set();
+  for (const part of String($('#ak-pages').value).split(/[,\s]+/).filter(Boolean)) { const m = /^(\d+)\s*[-~]\s*(\d+)$/.exec(part); if (m) { for (let i = Math.min(+m[1], +m[2]); i <= Math.max(+m[1], +m[2]); i++) set.add(i); } else if (/^\d+$/.test(part)) set.add(+part); }
+  const ps = [...set].filter(n => n >= 1 && n <= max).sort((a, b) => a - b);
+  if (!ps.length) return alert('읽을 해설 쪽을 적어 주세요(예: 13-17).');
+  if (!confirm(`해설 ${ps.length}쪽을 AI로 읽습니다(${mode === 'all' ? '정답 + 풀이' : '정답만'}, 쪽마다 API 한 번). 계속할까요?`)) return;
+  akStop = false; scanAbortCtl = new AbortController(); scanStopped = false;
+  $('#ak-go').disabled = true; $('#ak-stop').hidden = false;
+  const entries = [], fail = [];
+  try {
+    for (const [k, n] of ps.entries()) {
+      if (akStop) break;
+      $('#ak-status').textContent = `해설 ${n}쪽 읽는 중… (${k + 1} / ${ps.length})${scanUsage.in ? ` · 토큰 입력 ${scanUsage.in.toLocaleString()} / 출력 ${scanUsage.out.toLocaleString()}` : ''}`;
+      let r; try { r = await scanCallApi(await scanPageJpeg(n, keyDoc.doc), conf, KEY_PROMPT(mode), 'image/jpeg', [], schemaKey()); } catch (e) { if (akStop) break; if (/키|크레딧/.test(e.message)) { alert(e.message); break; } fail.push(`${n}쪽: ${e.message}`); continue; }
+      scanUsage.in += r.usage.input_tokens || 0; scanUsage.out += r.usage.output_tokens || 0;
+      const rows = r.data && Array.isArray(r.data.풀이) ? r.data.풀이 : null;
+      if (!rows) { fail.push(`${n}쪽: 결과를 읽지 못함`); continue; }
+      for (const row of rows) {
+        const num = String(row.번호 || '').trim();
+        if (/이어짐/.test(num) || !num) { const last = entries[entries.length - 1]; if (last) { if (row.해설) last.해설 = (last.해설 ? last.해설 + '\n' : '') + row.해설; if (row.정답 && !last.정답) last.정답 = row.정답; } continue; }
+        entries.push({ 쪽: n, 번호: num.replace(/^0+(?=\d)/, '') || num, 구분: String(row.구분 || ''), 정답: String(row.정답 || '').trim(), 해설: String(row.해설 || '').trim() });
+      }
+    }
+  } finally { $('#ak-go').disabled = false; $('#ak-stop').hidden = true; scanAbortCtl = null; }
+  /* 번호로 짝 찾기: 필수·발전 풀이는 예제 문제와, 나머지는 예제가 아닌 문제와. 같은 번호가 여럿이면 '정답 및 풀이 ○쪽' 표시가 가까운 문제 */
+  const EX = /^(필수|발전|예제|함께)$/;
+  let linked = 0, missing = [];
+  for (const en of entries) {
+    const ex = /필수|발전/.test(en.구분);
+    const cands = state.items.filter(x => String(x.num || '').replace(/^0+(?=\d)/, '') === en.번호 && EX.test(x.kind) === ex);
+    const it = cands.sort((a, b) => Math.abs((a.keyRef || en.쪽) - en.쪽) - Math.abs((b.keyRef || en.쪽) - en.쪽))[0];
+    if (!it || (it.keyRef && Math.abs(it.keyRef - en.쪽) > 1)) { missing.push(`${en.구분 || ''}${en.번호}`); continue; }
+    let did = false;
+    if (en.정답 && (over || !String(it.answer || '').trim())) { it.answer = en.정답; did = true; }
+    if (mode === 'all' && en.해설 && (over || !String(it.sol || '').trim())) { it.sol = en.해설; it.solKey = en.해설; it.solEdited = false; did = true; }
+    if (did) { it.savedAt = null; linked++; }
+  }
+  renderList(); renderEditor(); save();
+  $('#ak-status').textContent = `${akStop ? '멈춤. ' : ''}문제 ${linked}개에 넣었습니다.`;
+  alert(`${akStop ? '멈췄습니다. ' : ''}해설에서 풀이 ${entries.length}개를 읽어 문제 ${linked}개에 ${mode === 'all' ? '정답·해설' : '정답'}을 넣었습니다.${missing.length ? `\n\n짝을 못 찾은 번호(이 PDF에 없는 문제 등): ${missing.slice(0, 20).join(', ')}${missing.length > 20 ? ' …' : ''}` : ''}${fail.length ? `\n\n못 읽은 쪽:\n${fail.join('\n')}` : ''}\n\n검수 화면·카드에서 확인해 주세요.`);
+};
 /* 해설 짝 찾기: 정답 및 풀이의 (쪽 범위, 번호, 종류) → 문제 */
 const KEY_NUMBERED = ['소단원', '중단원', '대단원', '기초', '기본', '표준', '도전', '발전', '확인'];
 const keyItem = en => en.from == null ? null : state.items.find(x => +x.page >= en.from && +x.page <= en.to && +x.num === +en.num &&
@@ -7336,8 +7434,8 @@ async function svgToPng(svg, mmW) {
     return { png: c.toDataURL('image/png'), ratio: H / W };
   } catch (e) { return null; }
 }
-async function scanPageJpeg(n) {
-  const pg = await pdf.getPage(n), v1 = pg.getViewport({ scale: 1 }), s = Math.min(3, 1600 / v1.width), vp = pg.getViewport({ scale: s });
+async function scanPageJpeg(n, doc = pdf) {
+  const pg = await doc.getPage(n), v1 = pg.getViewport({ scale: 1 }), s = Math.min(3, 1600 / v1.width), vp = pg.getViewport({ scale: s });
   const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
   const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
   await pg.render({ canvasContext: g, viewport: vp }).promise;
