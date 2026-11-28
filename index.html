@@ -5665,7 +5665,7 @@ $('#b-del').onclick = () => {
 };
 $('#f-pdf').addEventListener('change', async e => {
   const f = e.target.files[0]; if (!f) return;
-  pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/', cMapPacked: true, standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/', disableFontFace: true }).promise; pages = {};
+  pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/', cMapPacked: true, standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/', disableFontFace: true }).promise; pages = {};
   hxPdfMap = null;
   if (state.items.some(x => x.hwpx)) {   // HWPX 문제를 읽은 뒤 연 PDF는 원본 대조용: 문제를 지우거나 다시 찾지 않음
     $('#s-from').value = 1; $('#s-to').value = Math.min(pdf.numPages, AUTO_PAGES);
@@ -6056,7 +6056,7 @@ async function readAnswerKey(doc) {
 $('#f-key').addEventListener('change', async e => {
   const f = e.target.files[0]; if (!f) return;
   if (!state.items.length) { alert('문제 PDF를 먼저 열어 주세요.'); e.target.value = ''; return; }
-  const doc = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/', cMapPacked: true, standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/', disableFontFace: true }).promise;
+  const doc = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/', cMapPacked: true, standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/', disableFontFace: true }).promise;
   keyDoc = { doc, name: f.name, pages: {} };
   const entries = await readAnswerKey(doc);
   /* 직접 고친 해설은 그대로 둠(묻고). 취소를 누르면 새로 읽은 해설로 바꿈 */
