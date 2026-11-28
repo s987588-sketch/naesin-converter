@@ -4258,13 +4258,15 @@ window.addEventListener('pointerup', async ev => {
 
 /* ── 문제 항목 ── */
 const pad3 = n => String(n).padStart(3, '0');
+/* 종류 + 번호: 종류가 숫자로 끝나면(STEP2) 번호와 붙어 읽히지 않게 _ 로 나눔 → STEP2_79 */
+const kindNum = it => String(it.kind || '') + (/\d$/.test(it.kind || '') && it.num ? '_' : '') + (it.num || '');
 function fileName(it) {
   const pg = it.page ? pad3(it.page) : 'p' + it.pdfPage;
-  return pg + '_' + ({ 역량: '역량', 직접: '직접' + it.num }[it.kind] ?? it.kind + it.num);
+  return pg + '_' + ({ 역량: '역량', 직접: '직접' + it.num }[it.kind] ?? kindNum(it));
 }
 function sourceText(it) {
   const pg = it.page || '?';
-  const kindLabel = it.kind === '역량' ? '내 역량' : it.kind === '직접' ? '' : it.kind + it.num;
+  const kindLabel = it.kind === '역량' ? '내 역량' : it.kind === '직접' ? '' : kindNum(it);
   if (state.kind === '교과서') return `${state.pub} 교과서 p${pg}${kindLabel ? '_' + kindLabel : ''}`;
   if (state.kind === '교사용 평가자료') return `${state.pub} ${WB_LABEL[it.kind] || '평가자료'}`;
   if (state.kind === '기출') return `${examName()}_${examNo(it)}`;
